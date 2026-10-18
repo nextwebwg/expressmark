@@ -37,9 +37,9 @@
   "devDependencies": {
     "@types/node": "22.20.1",
     "@types/sanitize-html": "2.16.2",
-    "oxlint": "1.81.0",
+    "oxlint": "1.88.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.0"
+    "vitest": "5.0.5"
   },
   "publishConfig": {
     "access": "public",
@@ -57,7 +57,7 @@
   "packageManager": "pnpm@12.9.1",
   "dependencies": {
     "htmlparser2": "12.0.0",
-    "markdown-it": "15.0.2",
+    "markdown-it": "15.0.3",
     "parseman": "0.54.0",
     "sanitize-html": "2.18.1",
     "yaml": "2.9.1"
