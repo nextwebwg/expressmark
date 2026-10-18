@@ -1,7 +1,15 @@
+![Expressmark — Markdown you can work with.](https://raw.githubusercontent.com/nextwebwg/expressmark/main/docs/assets/expressmark.svg)
+
 # expressmark
 
-Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/) into its
-JSON document AST, edit the data, and write Markdown again.
+Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/) into an
+editable JSON document, change the data, and write Markdown again.
+
+**[Quick start](#quick-start)** · **[HTML transformers](#make-the-html-your-own)** ·
+**[Supported syntax](#what-you-can-write)** · **[Benchmarks](benchmarks/README.md)** ·
+**[Future exploration](docs/future-exploration.md)**
+
+## Quick start
 
 ```sh
 pnpm add expressmark
@@ -18,12 +26,72 @@ document.body[0]!.title = { type: "title", value: "Check the backup" };
 console.log(stringify(document));
 ```
 
-## API
+```md
+::: warning [Check the backup]
+Back up the database first.
+:::
+```
+
+| You write | Expressmark gives you |
+| --- | --- |
+| Ordinary Markdown | Editable paragraphs, lists, links, code and tables |
+| `::: warning [Title]` | A semantic container with a designated title and body |
+| `:chip[Ready]{tone=green}` | An inline semantic node with authored attributes |
+| `@[Ada]#maintainer` | A mention with an entity reference separate from its occurrence ID |
+| Native rich HTML | Structured nodes where supported, filtered through a shared safe profile |
+
+## Make the HTML your own
+
+**New for 0.1.2; not yet in the published 0.1.1 package.** Import the separate
+renderer and override only the node types you need:
+
+```ts
+import { parse } from "expressmark";
+import { renderHtml } from "expressmark/render";
+
+const html = renderHtml(parse("::: warning\nBack up first.\n:::"), {
+  transformers: {
+    "container:warning": (_node, context) =>
+      `<aside class="notice">${context.renderChildren()}</aside>`,
+  },
+});
+// <aside class="notice"><p>Back up first.</p></aside>
+```
+
+Use `context.renderDefault()` to wrap a node's normal output, keeping custom
+renderers on its children. Use `context.escape(text)` when inserting authored
+strings into HTML. Custom output passes through the same safe HTML profile as
+default output. See [the transformer guide](docs/html-transformers.md) for lookup
+order, titles, omission, defaults and output-policy limits.
+
+Open semantic types and attributes cover most application customization without
+new grammar. markdown-it is an internal engine; Expressmark exposes no supported
+parser-plugin or engine-configuration API.
+
+## What you can write
+
+- CommonMark blocks and inline content, plus GFM tables, tasks, strikethrough and autolinks.
+- YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
+- Nested colon containers, inline/leaf directives, open semantic types and shared string/flag attributes.
+- Mention shorthand, chips and authored TOC placeholders.
+- Adjacent tab grouping and explicit tabs settings, including shared selection names.
+- Leading-pipe line blocks, code captions and presentation attributes.
+- Named and positional list tables, including rich cells, headers, alignment, transpose and rectangular merges.
+- Safe native HTML for supported rich text, wrappers, figures, disclosures and rich table cells.
+
+This implements a changing Stage 0 proposal. It does not claim complete
+conformance. The normative [syntax](https://nextwebwg.org/expressive-markdown/language),
+[AST](https://nextwebwg.org/expressive-markdown/ast) and
+[parser/writer rules](https://nextwebwg.org/expressive-markdown/parsing) live in
+[`nextwebwg/specs`](https://github.com/nextwebwg/specs).
+
+## Converter contract
 
 `parse(markdown, options?)` synchronously returns a version-1 `Document`.
 `stringify(document, options?)` synchronously returns canonical Markdown with a
-terminal newline, or an empty string for an empty document. Neither function
-executes code, loads assets, resolves mentions, generates a TOC, or renders HTML.
+terminal newline, or `""` for an empty document. Neither executes code, loads
+assets, resolves mentions, generates a TOC, or renders HTML. `renderHtml` is a
+separate operation.
 
 ```ts
 const document = parse(source, {
@@ -34,66 +102,68 @@ const document = parse(source, {
 const markdown = stringify(document, { onDiagnostic: console.warn });
 ```
 
-Recoverable source errors produce `literal` nodes and optional warning diagnostics.
-Duplicate attributes and YAML keys use the final value; duplicate authored IDs
-remain unchanged. Invalid supplied ASTs, unsupported versions, unknown structural
-nodes, and unsupported source mappings throw `ConversionError` with a `code`.
-Unknown semantic subtypes remain valid. No conversion claims byte preservation.
+Recoverable source errors become `literal` nodes with optional warnings. Duplicate
+attributes and YAML keys use the final value; duplicate authored IDs stay
+unchanged. Invalid ASTs, unsupported versions, unknown structural nodes, and
+unsupported source mappings throw `ConversionError` with a `code`. Unknown
+semantic subtypes remain valid. Conversion does not preserve source bytes.
 
-The exported JSON types are `Document`, `Node`, `Attributes`, `Json`, `Position`,
-`Point`, `Diagnostic`, and `ConversionOptions`. Node content uses exclusive
-`body`, `children`, or `value` slots; `title` is a separate designated slot.
-The writer validates these contracts at runtime, including child contexts and
-merged table grids. Optional source positions are not currently generated.
+Exported JSON types include `Document`, `Node`, `Attributes`, `Json`, `Position`,
+`Point`, `Diagnostic`, and `ConversionOptions`. Content uses exclusive `body`,
+`children`, or `value` slots; `title` is a separate designated slot. The writer
+validates child contexts and merged table grids. Source positions are not
+currently generated.
 
-## Supported writing
+<details>
+<summary><strong>Rich HTML and preservation</strong></summary>
 
-- CommonMark blocks and inline content, plus GFM tables, tasks, strikethrough and autolinks.
-- YAML frontmatter, designated document title/ID and JSON-compatible custom metadata.
-- Nested colon containers, inline/leaf directives, open semantic types and shared string/flag attributes.
-- Mention shorthand with separate entity references and occurrence IDs; chips and authored TOCs.
-- Adjacent `tab` grouping and explicit `tabs` settings, including shared selection names.
-- Leading-pipe line blocks, code captions/presentation attributes, and rectangular merged tables.
-- List-based tables with named or positional rows, rich cell bodies, optional
-  headers, transposition and displayed-column alignment. Writers prefer these
-  forms; GFM pipe tables remain accepted.
-- Safe native HTML for supported rich text, wrappers, figures, disclosures and rich table cells.
+The [safe HTML profile](docs/safe-html.md) applies while parsing, writing, and
+rendering. Scripts and their contents are discarded; literal code containing
+HTML stays code. Filtering can remove presentation and produces a warning.
+Omitting the diagnostic callback does not disable the policy.
 
-This is an implementation of a changing Stage 0 proposal, not a claim of complete
-conformance. Rich native HTML is filtered by the documented
-[safe HTML profile](https://github.com/nextwebwg/expressmark/blob/main/docs/safe-html.md).
-Scripts and their contents are discarded during parsing and writing; literal code
-containing HTML stays code. Some presentation is intentionally removed. A warning
-reports filtering; a missing diagnostic callback does not disable the policy.
+Rich wrappers can use inert `data-attributes` data to retain scalar types HTML
+cannot express, such as a custom false flag. That payload never stores content
+nodes or restores executable fields. Unsupported structures fail explicitly;
+unrecognized safe HTML may remain opaque with its accepted markup preserved.
 
-Rich wrappers may use the tool's inert `data-attributes` profile to retain scalar
-attribute types that HTML cannot express, such as a custom false flag. It never
-stores content nodes or restores executable HTML fields. Other unsupported
-structures fail explicitly rather than flattening or silently dropping content.
-Unrecognized safe HTML can remain opaque, with its accepted markup preserved.
+</details>
 
-The normative [syntax and AST examples](https://nextwebwg.org/expressive-markdown/language) and
-[parser/writer rules](https://nextwebwg.org/expressive-markdown/parsing)
-are maintained in `nextwebwg/specs`.
+## Performance you can reproduce
 
-## Development and releases
+The [comparison suite](benchmarks/README.md) measures parsing, Markdown writing,
+round trips and reference HTML pipelines against pinned implementations. Results
+include workload sizes, versions, runtime, hardware and individual samples.
+Expressmark does additional AST conversion, extension handling and validation;
+raw tokenization timings are a different output contract.
 
-Use Corepack with the committed pnpm 12 version and a supported Node LTS release:
+There is no blanket “fastest parser” claim. Use the recorded workloads to assess
+your use case. The [agent exploration backlog](docs/future-exploration.md) explains
+how to investigate a complete Parseman grammar and broader speed comparisons.
+
+## Development
+
+Use Corepack, the committed pnpm 12 version, and a supported Node LTS release:
 
 ```sh
 corepack enable
-pnpm install --frozen-lockfile
-pnpm verify:pr
+corepack pnpm install --frozen-lockfile
+corepack pnpm verify:pr
 ```
+
+In Conductor, add this repository with **Open project**. The checked-in
+[settings](.conductor/settings.toml) install dependencies and provide verification,
+watch and benchmark commands. Shared settings take effect locally after merging
+them to the default branch.
 
 TypeScript 7 builds strict ESM declarations. Parseman recognizes extension tokens;
 markdown-it handles base Markdown, YAML handles metadata, and sanitize-html with
-htmlparser2 handles the safe native profile. Oxlint and Vitest verify the code,
-round trips, unsafe input, malformed data, and a fresh packed-package consumer.
+htmlparser2 handles the safe native profile. Oxlint and Vitest check conversions,
+unsafe input, malformed data, round trips and a fresh packed-package consumer.
 
 The manual **Release** workflow publishes reviewed `main` through the protected
-`npm` environment. The version input must match `package.json`. Publication uses
-npm trusted publishing with provenance. Foundation owns the shared policy files
-listed in `threadlabs.config.json`.
+`npm` environment using trusted publishing with provenance. The requested version
+must match `package.json`. Foundation owns policy files listed in
+`threadlabs.config.json`.
 
-MIT licensed. See [LICENSE](./LICENSE).
+MIT licensed. See [LICENSE](LICENSE).

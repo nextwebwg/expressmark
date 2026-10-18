@@ -32,6 +32,9 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
     const exports = execFileSync(process.execPath, ["--input-type=module", "--eval",
       'import * as api from "expressmark"; console.log(JSON.stringify(Object.keys(api)));'], options);
     expect(JSON.parse(exports)).toEqual(["ConversionError", "parse", "stringify"]);
+    const rendered = execFileSync(process.execPath, ["--input-type=module", "--eval",
+      'import {parse} from "expressmark"; import {renderHtml} from "expressmark/render"; console.log(renderHtml(parse("# Hello"), {transformers:{heading:(_node,ctx)=>`<aside>${ctx.renderChildren()}</aside>`}}));'], options);
+    expect(rendered.trim()).toBe("<aside>Hello</aside>");
     const converted = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: warning [Check]\\nBackup first.\\n:::"); console.log(stringify(doc));'], options);
     expect(converted).toContain("warning");
     const table = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: table {transpose}\\n- Name: Alpha\\n  Role: Reviewer\\n:::"); const markdown=stringify(doc); console.log(JSON.stringify({doc,again:parse(markdown),markdown}));'], options);
@@ -39,7 +42,7 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
     expect(result.doc.body[0]).toMatchObject({type:"table",children:[{children:[{header:true,value:"Name"},{value:"Alpha"}]},{children:[{header:true,value:"Role"},{value:"Reviewer"}]}]});
     expect(result.again).toEqual(result.doc);
     expect(result.markdown).toContain("table");
-    writeFileSync(join(consumer, "index.ts"), 'import {parse,stringify,type Document} from "expressmark"; const doc: Document = parse("# Hello"); stringify(doc);\n');
+    writeFileSync(join(consumer, "index.ts"), 'import {parse,stringify,type Document} from "expressmark"; import {renderHtml,type HtmlTransformer} from "expressmark/render"; const doc: Document = parse("# Hello"); stringify(doc); const heading: HtmlTransformer = (_node,ctx) => ctx.renderDefault(); renderHtml(doc,{transformers:{heading}});\n');
     const tsc = fileURLToPath(new URL("./bin/tsc", import.meta.resolve("typescript/package.json")));
     execFileSync(process.execPath, [tsc, "--strict", "--noEmit", "--skipLibCheck", "--target", "ES2023",
       "--module", "NodeNext", "index.ts"], options);

@@ -1,0 +1,15 @@
+{
+  "name": "expressmark-benchmarks",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "scripts": { "bench": "node run.mjs" },
+  "devDependencies": {
+    "commonmark": "0.31.2",
+    "markdown-it": "15.0.2",
+    "marked": "18.1.1",
+    "mdast-util-from-markdown": "2.1.0",
+    "mdast-util-to-markdown": "2.2.0",
+    "micromark": "4.0.3"
+  }
+}

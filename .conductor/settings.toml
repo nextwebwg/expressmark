@@ -1,0 +1,18 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "corepack pnpm install --frozen-lockfile"
+run_mode = "concurrent"
+
+[scripts.run.verify]
+command = "corepack pnpm verify:pr"
+default = true
+icon = "test-tube"
+
+[scripts.run.watch]
+command = "corepack pnpm exec vitest"
+icon = "test-tube"
+
+[scripts.run.benchmark]
+command = "corepack pnpm build && corepack pnpm --dir benchmarks --ignore-workspace install --frozen-lockfile && corepack pnpm --dir benchmarks --ignore-workspace bench"
+icon = "gauge"
