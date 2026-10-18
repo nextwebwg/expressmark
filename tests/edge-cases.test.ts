@@ -1,6 +1,33 @@
 import { expect, it } from "vitest";
 import { parse, stringify } from "../src/index.js";
 
+it("preserves marked whitespace and neighboring rich content through Markdown",()=> {
+  for(const type of ["strong","emphasis","delete"]) for(const value of ["Hello "," Hello"," ","\tHello\t","\u00a0Hello\u00a0"]) {
+    const document={type:"document",version:1,body:[{type:"paragraph",children:[
+      {type,value},{type:"inline",subType:"mention",value:"Ada",ref:"user-123"},
+    ]}]} as const;
+    expect(parse(stringify(document as never)),`${type}: ${JSON.stringify(value)}`).toEqual(document);
+  }
+});
+it("preserves adjacent and nested marks rather than merging their delimiters",()=> {
+  const nodes=[
+    [{type:"strong",value:"One"},{type:"strong",value:"Two"}],
+    [{type:"strong",children:[{type:"emphasis",value:"Both"}]}],
+    [{type:"text",value:"before"},{type:"strong",value:"!"},{type:"text",value:"after"}],
+    [{type:"text",value:"before"},{type:"emphasis",value:"🧶"},{type:"text",value:"after"}],
+  ];
+  for(const children of nodes) {
+    const document={type:"document",version:1,body:[{type:"paragraph",children}]} as const;
+    expect(parse(stringify(document as never))).toEqual(document);
+  }
+  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"Ordinary"}]}]})).toBe("**Ordinary**\n");
+});
+it("keeps literal character-reference text rather than decoding it on reparse",()=> {
+  const document={type:"document",version:1,body:[{type:"paragraph",value:"Use &copy;, &#32; and &#x41; literally; A & B stays readable."}]} as const;
+  expect(parse(stringify(document as never))).toEqual(document);
+  expect(stringify(document as never)).toContain("A & B");
+});
+
 it("keeps unknown safe native elements stable through canonical writing",()=> {
   const document=parse('A <abbr title="Application Programming Interface">API</abbr>.\n\n<aside>Safe <kbd>Enter</kbd>.</aside>');
   expect(parse(stringify(document))).toEqual(document);
