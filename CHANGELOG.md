@@ -2,6 +2,9 @@
 
 ## 0.1.2
 
+- Render layout containers with logical alignment and whole-group floating;
+  verify block placement, text alignment and surrounding flow in Arabic, Hebrew
+  and English across Chromium, Firefox and WebKit.
 - Add the separate `expressmark/render` HTML renderer with per-node and semantic
   subtype overrides, default rendering helpers and shared output filtering.
 - Reuse parsed inline tokens during AST conversion instead of parsing ordinary

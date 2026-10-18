@@ -6,6 +6,7 @@ Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/) into an
 editable JSON document, change the data, and write Markdown again.
 
 **[Quick start](#quick-start)** · **[HTML transformers](#make-the-html-your-own)** ·
+**[Layout](#align-and-float-content)** ·
 **[Supported syntax](#what-you-can-write)** · **[Benchmarks](benchmarks/README.md)** ·
 **[Future exploration](docs/future-exploration.md)**
 
@@ -67,6 +68,29 @@ order, titles, omission, defaults and output-policy limits.
 Open semantic types and attributes cover most application customization without
 new grammar. markdown-it is an internal engine; Expressmark exposes no supported
 parser-plugin or engine-configuration API.
+
+## Align and float content
+
+Use a layout container to center a group of blocks and their text:
+
+```md
+::: layout {align=center}
+![Service diagram](services.svg){width=320 responsive}
+
+Services communicate through a shared queue.
+:::
+```
+
+`align=start|center|end` controls alignment inside the group.
+`float=start|end` floats the whole group so surrounding text can flow around it.
+Both work with any block content, including quotations, figures and code.
+Directions follow the document's writing direction; set `dir=rtl` for an RTL
+group or inherit it from the surrounding HTML. `lang` alone does not set direction.
+
+`parse` and `stringify` preserve layout data; `renderHtml` supplies native logical
+CSS. [Layout examples and browser verification](docs/html-transformers.md#layout)
+cover Arabic, Hebrew, nested direction changes and child overrides. This built-in
+rendering is targeted for 0.1.2.
 
 ## What you can write
 

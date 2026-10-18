@@ -16,7 +16,7 @@ jobs:
   verify:
     name: Verify Node ${{ matrix.node }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +30,7 @@ jobs:
       - run: npm install --global --ignore-scripts --force corepack@0.34.7
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm verify:pr
 
   required:

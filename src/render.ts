@@ -1,6 +1,9 @@
 import { escapeHtml, sanitizeHtml } from "./html.js";
 import { sourceKey } from "./grammar.js";
-import { ConversionError, type ConversionOptions, type Document, type Node } from "./types.js";
+import { ConversionError, warn, type ConversionOptions, type Document, type Node } from "./types.js";
+
+type LayoutAlignment = "start" | "center" | "end";
+function isAlignment(value: unknown): value is LayoutAlignment { return value === "start" || value === "center" || value === "end"; }
 
 const nativeAttributes = new Set([
   "id", "class", "style", "title", "lang", "dir", "href", "name", "target", "rel",
@@ -30,6 +33,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   }
   const active = new Set<Node>();
   const transformers = options.transformers ?? {};
+  let inheritedAlignment: LayoutAlignment | undefined;
   function content(node: Node): string {
     return node.value != null ? escapeHtml(node.value) : (node.body ?? node.children ?? []).map(render).join("");
   }
@@ -38,6 +42,10 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   }
   function attributes(node: Node, extra: Record<string, string | boolean | number> = {}): string {
     const values: Record<string, string | boolean | number> = { ...node.attributes, ...extra };
+    if (inheritedAlignment !== undefined && node.type === "image") {
+      values.style = `max-inline-size:100%${typeof values.style === "string" ? `;${values.style}` : ""}`;
+    }
+    if (typeof extra.style === "string" && typeof node.attributes?.style === "string") values.style = `${extra.style};${node.attributes.style}`;
     if (node.id !== undefined) values.id = node.id;
     return Object.entries(values).map(([key, value]) => {
       let name = sourceKey(key);
@@ -49,6 +57,38 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   }
   function element(node: Node, tag: string, value: string, extra: Record<string, string | boolean | number> = {}): string {
     return `<${tag}${attributes(node, extra)}>${value}</${tag}>`;
+  }
+  function layout(node: Node): string {
+    const requested = node.attributes?.align;
+    const alignment = isAlignment(requested) ? requested : inheritedAlignment ?? "start";
+    const float = node.attributes?.float;
+    if (requested !== undefined && !isAlignment(requested)) warn(options, "unsupported-layout-attribute", "Layout align needs start, center or end; using inherited alignment or start.");
+    if (float !== undefined && float !== "start" && float !== "end") warn(options, "unsupported-layout-attribute", "Layout float needs start or end; using ordinary flow.");
+    function item(value: string, align: LayoutAlignment, inlineSize: "fit-content" | "auto" = "fit-content"): string {
+      const start = align === "start" ? "0" : "auto";
+      const end = align === "end" ? "0" : "auto";
+      // This wrapper uses the parent's direction even when its child has dir=ltr
+      // inside RTL content. Native logical margins handle placement; the child's
+      // own direction and explicit text styles still control its text.
+      return `<div style="inline-size:${inlineSize};max-inline-size:100%;margin-inline-start:${start};margin-inline-end:${end}">${value}</div>`;
+    }
+    const previous = inheritedAlignment;
+    let value: string;
+    inheritedAlignment = alignment;
+    try {
+      value = `${node.title ? item(`<header>${title(node)}</header>`, alignment) : ""}${(node.body ?? []).map(child => {
+        const isLayout = child.type === "container" && child.subType === "layout";
+        const output = render(child);
+        // A floated layout must share its siblings' normal-flow context so their
+        // text can flow around it. An item wrapper would isolate that float.
+        if (isLayout && (child.attributes?.float === "start" || child.attributes?.float === "end")) return output;
+        return item(output, isLayout && isAlignment(child.attributes?.align) ? child.attributes.align : alignment, child.type === "horizontalRule" ? "auto" : "fit-content");
+      }).join("")}`;
+    } finally { inheritedAlignment = previous; }
+    return element(node, "div", value, {
+      "data-type": "layout",
+      style: `display:flow-root;max-inline-size:100%;text-align:${alignment}${float === "start" || float === "end" ? `;float:inline-${float}` : ""}`,
+    });
   }
   function defaultRender(node: Node): string {
     switch (node.type) {
@@ -83,6 +123,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       case "lineBlock": return element(node, "div", content(node), { "data-type": "line-block", style: "white-space:pre-line" });
       case "inline": case "leaf": return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { "data-type": node.subType ?? "", ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
       case "container": {
+        if (node.subType === "layout") return layout(node);
         const heading = title(node);
         if (node.subType === "details") return element(node, "details", `${node.title ? `<summary>${heading}</summary>` : ""}${content(node)}`);
         if (node.subType === "figure") return element(node, "figure", `${content(node)}${node.title ? `<figcaption>${heading}</figcaption>` : ""}`);

@@ -67,7 +67,8 @@ throws `ConversionError` with code `cyclic-html-node`.
 
 Common Markdown maps to native paragraphs, headings, formatting, lists, quotes,
 links, images and code. Tables retain captions and cell spans. `details` and
-`figure` containers use native elements. Other containers use `section[data-type]`;
+`figure` containers use native elements. Layout containers use `div[data-type="layout"]`
+with logical alignment and floating. Other containers use `section[data-type]`;
 inline directives use `span[data-type]`. A document title renders as an initial
 `h1`; metadata is not rendered. Text with an identity or attributes uses a `span`;
 custom scalar attributes use inert `data-*` names.
@@ -77,6 +78,60 @@ safe HTML profile. TOC leaves produce an empty `nav[data-type="toc"]` placeholde
 Tabs remain semantic containers. Table column alignment and application-specific
 presentation need a transformer. Rendering does not fetch assets, execute code,
 resolve mentions, generate navigation or attach interaction.
+
+## Layout
+
+The [public layout contract](https://nextwebwg.org/expressive-markdown/language#layout)
+defines `align=start|center|end` and optional `float=start|end` on ordinary
+`container` nodes with `subType: "layout"`. The parser needs no plugin.
+
+```md
+::: layout {align=center & float=end & style="inline-size:12rem"}
+> A small example is easier to understand.
+
+— The editor
+:::
+
+This paragraph can flow beside the whole quotation and attribution.
+```
+
+Alignment positions the group's child blocks and supplies their text alignment.
+A nested layout can override alignment; otherwise it inherits the enclosing
+layout's value, defaulting to `start`. Safe explicit child text styles take
+precedence. Floating applies to the whole group, independently of its internal
+alignment, and is not inherited. Source and reading order stay intact.
+
+Set `dir=rtl` on a layout or inherit direction from its host HTML; `lang=ar` or
+`lang=he` labels content but does not set direction. Logical start/end resolve
+against the containing flow for floating, the parent layout for block placement,
+and the text's own direction for text alignment. This also permits LTR text
+inside an RTL layout. No physical left/right layout aliases are defined.
+
+The implementation composes native `flow-root`, logical inline sizes/margins,
+`text-align` and `float:inline-start|inline-end`. Item wrappers keep placement in
+the parent's direction when a child has its own `dir`. Floated child layouts
+share their siblings' flow rather than receiving an isolating item wrapper.
+Images inside layouts have a default `max-inline-size:100%`. An authored safe
+style can override the renderer's defaults. Custom layout transformers own their
+replacement presentation and still pass through the shared sanitizer.
+
+Native floating needs room beside the group. At narrow widths text can continue
+below it; a layout in a host flex/grid context follows native float behavior.
+The renderer adds no positioning runtime or external stylesheet.
+
+Unsupported align/float values remain authored data and emit
+`unsupported-layout-attribute` during default rendering. They use the omitted
+attribute behavior. Native `div[data-type="layout"]` wrappers import as editable
+layout containers, with `data-align`/`data-float` restored to their attributes.
+
+Run `corepack pnpm exec playwright install chromium firefox webkit` once, then
+`corepack pnpm test:browser`. The single-worker suite measures rendered block and
+text geometry after parsing, rendering and sanitizing in Chromium, Firefox and
+WebKit. It covers start/center/end and both floats in English, Arabic and Hebrew,
+plus a narrow RTL viewport, inherited alignment and a nested LTR override.
+`verify:pr` includes these browser tests.
+
+## Input and filtering
 
 The renderer does not mutate the AST. Callbacks receive a shallow readonly node
 and remain responsible for their own mutations. Input must be parser output or a
