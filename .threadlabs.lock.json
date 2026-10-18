@@ -1,0 +1,28 @@
+{
+  "artifacts": {
+    ".gitattributes": "e54c83aec897237a7b75759915ef0634b3466eae3614a8d676db2012d49faa9e",
+    ".github/dependabot.yml": "4c835c01213d922e37a495e4c027c9fc5a37afe86939ac216d848f18750b19d2",
+    ".gitignore": "51e0142fd08c85a2da9e468606de67498092c6eea092b34bde9acfc81b61e5ad",
+    "CLAUDE.md": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
+    "LICENSE": "d36b9fbad64a5eb046f984d62952c14ec989c49f4f9c61aee775eb4d4c258053",
+    "docs/code-documentation-standard.md": "86c505d61ecf7c87f014dfc421b083379b46d3796e194e1e17fcf88b6ec6d1ec",
+    "oxlint.json": "d435ac06f3f195c630ac9ee7556695dad99e18d647df60441c53ee6dd9db38cc",
+    "pnpm-workspace.yaml": "9adb0ed8f3b7cfaa6353148a7c6f03c5e93f02860fd8e0437bd369da9d86628c",
+    "threadlabs.config.json": "984b26259aa846b913d85fa428b35423e09d4335fefe97e7b5f0e9b89b69deca",
+    "tsconfig.build.json": "86aabca591603c918fc0e30f0f15beea30de0a5ed1ba980101deefa2affcb6e9",
+    "tsconfig.json": "bdd65ea8907cee3913f8ad013ba816448bacab64e8d4fc37104c0f91451c080c"
+  },
+  "modules": {
+    "agents": "1.0.0",
+    "code-documentation": "1.0.0",
+    "core": "1.0.0",
+    "freshness": "1.0.0",
+    "generated-artifacts": "1.0.0",
+    "github": "1.0.0",
+    "npm-publish": "1.0.0",
+    "public-api": "1.0.0",
+    "typescript-node": "1.0.0"
+  },
+  "schemaVersion": "1.0",
+  "standardVersion": "1.0.0"
+}

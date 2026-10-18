@@ -3,31 +3,42 @@
 JavaScript tooling for [Expressive Markdown](https://nextwebwg.org/expressive-markdown/),
 a common language for documentation.
 
-**Version 0.0.1 reserves the package name and establishes the ESM/TypeScript package.
-It exports no API. Parsing, writing, rendering, and AST utilities are not implemented.**
+**The 0.0.x releases establish the package and its independent repository. They export
+no API. Parsing, writing, rendering and AST utilities are not implemented yet.**
 
-The specification and official AST reference live in the
+The language and official AST are defined in the
 [public proposal](https://nextwebwg.org/expressive-markdown/ast), maintained in
 [nextwebwg/specs](https://github.com/nextwebwg/specs/tree/main/expressive-markdown).
-Future Markdown ↔ AST conversion will use parseman; this reservation has no runtime dependencies.
+Normative specification material lives there.
 
 ## Development
 
-From the monorepo root, run `corepack pnpm --filter expressmark verify` to typecheck,
-build, pack, and test the package from an installed consumer. Versions are independent of
-the four lockstep HTML Next packages.
+Use Corepack with the committed pnpm 12 version and a supported Node LTS release:
 
-## Publishing
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm verify:pr
+```
 
-The first publication requires an npm maintainer to run `npm publish` on the verified
-tarball; npm trusted publishing cannot create a package. Configure npm's trusted publisher
-for repository `nextwebwg/html-next`, workflow `expressmark-release.yml`, and environment
-`expressmark-release` after that first publication.
+The project uses TypeScript 7, Oxlint and Vitest. Parseman is pinned as a development
+dependency for the upcoming Markdown ↔ AST converter; the scaffold has no runtime
+dependencies. `pnpm verify:pr` checks lint, strict types, the build, and consumption of
+the packed package from a fresh installation. No browser runner is needed for this scaffold.
 
-Later releases use the manual **Release expressmark** GitHub workflow on `main`. Its
-`version` input must match `packages/expressmark/package.json`. The job verifies the package
-before packing and publishes through OIDC with provenance. It uses the protected
-`expressmark-release` environment; the repository owner must approve each publication.
-It never publishes the component packages.
+Foundation owns the shared policy files listed in `threadlabs.config.json`. The package,
+its API, documentation and workflows are locally owned. Dependabot proposes dependency
+updates; the weekly freshness workflow reports outdated pins for review.
+
+## Releases
+
+Version 0.0.1 reserved the npm name from the HTML Next monorepo. Version 0.0.2 moves the
+package here and updates its repository metadata. Versions are independent of HTML Next.
+
+The manual **Release** workflow publishes only a reviewed `main` commit through the
+`npm` environment, which requires owner approval. Its version input must match
+`package.json`; lint, types, packed-consumer checks and a clean source tree are required.
+Publication uses npm trusted publishing with provenance, without a repository npm token.
+The npm trusted publisher must name `nextwebwg/expressmark`, `release.yml`, environment `npm`.
 
 MIT licensed. See [LICENSE](./LICENSE).

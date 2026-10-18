@@ -23,10 +23,12 @@ it("ships an importable ESM reservation with declarations and no runtime depende
     execFileSync("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", join(consumer, packed!.filename)], options);
     const installed = JSON.parse(readFileSync(join(consumer, "node_modules/expressmark/package.json"), "utf8"));
     expect(installed.name).toBe("expressmark");
+    expect(installed.repository.url).toBe("git+https://github.com/nextwebwg/expressmark.git");
+    expect(installed.repository.directory).toBeUndefined();
     expect(installed.license).toBe("MIT");
     expect(installed.dependencies ?? {}).toEqual({});
     expect(readFileSync(join(consumer, "node_modules/expressmark/LICENSE"), "utf8"))
-      .toBe(readFileSync(join(root, "../../LICENSE"), "utf8"));
+      .toBe(readFileSync(join(root, "LICENSE"), "utf8"));
     const exports = execFileSync(process.execPath, ["--input-type=module", "--eval",
       'import * as api from "expressmark"; console.log(JSON.stringify(Object.keys(api)));'], options);
     expect(JSON.parse(exports)).toEqual([]);

@@ -1,7 +1,7 @@
 {
   "name": "expressmark",
-  "version": "0.0.1",
-  "description": "Expressive Markdown tooling — initial package reservation; parser and writer are not implemented yet.",
+  "version": "0.0.2",
+  "description": "Expressive Markdown tooling — package scaffold; parser and writer are not implemented yet.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -15,20 +15,27 @@
     "dist"
   ],
   "engines": {
-    "node": ">=22.22.2 <23 || >=24.15 <25"
+    "node": ">=22.13 <23 || >=24 <25"
   },
   "scripts": {
-    "build": "pnpm clean && tsc -p tsconfig.build.json",
     "clean": "node --input-type=module --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
-    "prepack": "pnpm build",
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test:package": "vitest run --config vitest.package.config.ts",
-    "verify": "pnpm typecheck && pnpm build && pnpm test:package"
+    "lint": "oxlint --deny-warnings .",
+    "test": "pnpm build && vitest run",
+    "test:package": "pnpm build && vitest run tests/package.test.ts",
+    "verify:inner": "pnpm lint && pnpm typecheck",
+    "verify:pr": "pnpm verify:inner && pnpm test",
+    "verify:release": "pnpm verify:pr",
+    "check:freshness": "npm outdated --json",
+    "prepack": "pnpm build"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "@types/node": "22.20.1",
+    "oxlint": "1.81.0",
+    "parseman": "0.54.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
   },
   "publishConfig": {
     "access": "public",
@@ -37,11 +44,11 @@
   },
   "homepage": "https://nextwebwg.org/expressive-markdown/",
   "bugs": {
-    "url": "https://github.com/nextwebwg/html-next/issues"
+    "url": "https://github.com/nextwebwg/expressmark/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nextwebwg/html-next.git",
-    "directory": "packages/expressmark"
-  }
+    "url": "git+https://github.com/nextwebwg/expressmark.git"
+  },
+  "packageManager": "pnpm@12.9.1"
 }

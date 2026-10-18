@@ -1,0 +1,125 @@
+{
+  "bundles": [
+    "typescript-library"
+  ],
+  "documentation": {
+    "hotspots": []
+  },
+  "exceptions": [],
+  "freshness": {
+    "holds": [
+      {
+        "name": "@types/node",
+        "owner": "Next Web Working Group",
+        "reason": "Type declarations intentionally target the minimum supported Node line.",
+        "reviewDate": "2027-01-31"
+      }
+    ]
+  },
+  "modules": [],
+  "ownership": [
+    {
+      "mode": "local",
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "mode": "local",
+      "path": ".github/workflows/release.yml"
+    },
+    {
+      "mode": "local",
+      "path": "AGENTS.md"
+    },
+    {
+      "mode": "local",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "mode": "local",
+      "path": "README.md"
+    },
+    {
+      "mode": "local",
+      "path": "package.json"
+    },
+    {
+      "mode": "local",
+      "path": "scripts/release.mjs"
+    },
+    {
+      "mode": "local",
+      "path": "src/index.ts"
+    },
+    {
+      "mode": "local",
+      "path": "tests/index.test.ts"
+    },
+    {
+      "mode": "local",
+      "path": "tests/package.test.ts"
+    },
+    {
+      "mode": "local",
+      "path": "vitest.config.ts"
+    },
+    {
+      "mode": "managed",
+      "path": ".gitattributes"
+    },
+    {
+      "mode": "managed",
+      "path": ".github/dependabot.yml"
+    },
+    {
+      "mode": "managed",
+      "path": ".gitignore"
+    },
+    {
+      "mode": "managed",
+      "path": ".threadlabs.lock.json"
+    },
+    {
+      "mode": "managed",
+      "path": "CLAUDE.md"
+    },
+    {
+      "mode": "managed",
+      "path": "LICENSE"
+    },
+    {
+      "mode": "managed",
+      "path": "docs/code-documentation-standard.md"
+    },
+    {
+      "mode": "managed",
+      "path": "oxlint.json"
+    },
+    {
+      "mode": "managed",
+      "path": "pnpm-workspace.yaml"
+    },
+    {
+      "mode": "managed",
+      "path": "threadlabs.config.json"
+    },
+    {
+      "mode": "managed",
+      "path": "tsconfig.build.json"
+    },
+    {
+      "mode": "managed",
+      "path": "tsconfig.json"
+    }
+  ],
+  "release": {
+    "strategy": "single-package"
+  },
+  "schemaVersion": "1.0",
+  "settings": {
+    "description": "JavaScript tooling for Expressive Markdown, a common language for documentation.",
+    "licenseHolder": "Next Web Working Group",
+    "licenseYear": 2026,
+    "projectName": "expressmark"
+  },
+  "standardVersion": "1.0.0"
+}

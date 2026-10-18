@@ -1,0 +1,6 @@
+# Exact exceptions for the pinned release set; other releases retain pnpm's age gate.
+minimumReleaseAgeExclude:
+  - '@vitest/mocker@5.0.0'
+  - '@vitest/spy@5.0.0'
+  - 'postcss@8.5.28'
+  - 'vitest@5.0.0'
