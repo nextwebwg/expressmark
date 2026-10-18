@@ -8,7 +8,7 @@ import { expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
-it("ships an importable ESM reservation with declarations and no runtime dependencies", () => {
+it("ships a working ESM converter with declarations to a fresh package consumer", () => {
   const consumer = mkdtempSync(join(tmpdir(), "expressmark-consumer-"));
   const options = { cwd: consumer, encoding: "utf8" as const, shell: process.platform === "win32" };
   try {
@@ -20,19 +20,21 @@ it("ships an importable ESM reservation with declarations and no runtime depende
     expect(files).toEqual(expect.arrayContaining(["LICENSE", "README.md", "package.json", "dist/index.js", "dist/index.d.ts"]));
     expect(files.every((path) => /^(?:dist\/|LICENSE$|README.md$|package.json$)/.test(path))).toBe(true);
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
-    execFileSync("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", join(consumer, packed!.filename)], options);
+    execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", join(consumer, packed!.filename)], options);
     const installed = JSON.parse(readFileSync(join(consumer, "node_modules/expressmark/package.json"), "utf8"));
     expect(installed.name).toBe("expressmark");
     expect(installed.repository.url).toBe("git+https://github.com/nextwebwg/expressmark.git");
     expect(installed.repository.directory).toBeUndefined();
     expect(installed.license).toBe("MIT");
-    expect(installed.dependencies ?? {}).toEqual({});
+    expect(installed.dependencies).toMatchObject({parseman:"0.54.0", "markdown-it":"15.0.2", "sanitize-html":"2.18.1"});
     expect(readFileSync(join(consumer, "node_modules/expressmark/LICENSE"), "utf8"))
       .toBe(readFileSync(join(root, "LICENSE"), "utf8"));
     const exports = execFileSync(process.execPath, ["--input-type=module", "--eval",
       'import * as api from "expressmark"; console.log(JSON.stringify(Object.keys(api)));'], options);
-    expect(JSON.parse(exports)).toEqual([]);
-    writeFileSync(join(consumer, "index.ts"), 'import * as api from "expressmark"; void api;\n');
+    expect(JSON.parse(exports)).toEqual(["ConversionError", "parse", "stringify"]);
+    const converted = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: warning [Check]\\nBackup first.\\n:::"); console.log(stringify(doc));'], options);
+    expect(converted).toContain("warning");
+    writeFileSync(join(consumer, "index.ts"), 'import {parse,stringify,type Document} from "expressmark"; const doc: Document = parse("# Hello"); stringify(doc);\n');
     const tsc = fileURLToPath(new URL("./bin/tsc", import.meta.resolve("typescript/package.json")));
     execFileSync(process.execPath, [tsc, "--strict", "--noEmit", "--skipLibCheck", "--target", "ES2023",
       "--module", "NodeNext", "index.ts"], options);

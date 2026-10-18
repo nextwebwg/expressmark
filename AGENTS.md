@@ -4,8 +4,8 @@
   normative language and official AST live in `nextwebwg/specs`, published at
   https://nextwebwg.org/expressive-markdown/. Keep specification prose and conformance
   decisions there; implementation notes belong here.
-- The 0.0.x package is a scaffold with no public API. Do not claim parsing, writing,
-  rendering or AST support before implementation and meaningful proof exist.
+- The 0.1.x API parses and writes the documented draft subset. Do not claim full
+  conformance or rendering support; unsupported AST conversions fail explicitly.
 - Use parseman for the Markdown ↔ AST converter, strict ESM TypeScript 7, pnpm 12
   through Corepack, Oxlint and Vitest. Keep exact reviewed pins in the package and lockfile.
 - Treat `threadlabs.config.json` as the ownership map. Review Foundation plans and their

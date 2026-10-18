@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0
+
+- Add synchronous `parse` and `stringify`, document AST types and recoverable diagnostics.
+- Support metadata, shared attributes, mentions, nested containers, tabs, line blocks,
+  merged tables and safe rich HTML import/export alongside ordinary Markdown.
+- Filter active HTML and unsafe native presentation on both conversion boundaries.
+- Reject unsupported AST conversions instead of silently losing content.
+
 ## 0.0.2
 
 - Move the package to `nextwebwg/expressmark`, with independent pnpm 12, TypeScript 7,
