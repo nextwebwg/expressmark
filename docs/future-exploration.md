@@ -87,6 +87,38 @@ Before a migration:
 A prototype is evidence, not permission to replace the shipped engine. Keep
 public AST and converter contracts stable unless the owner approves a change.
 
+## Preserve the author’s source form
+
+The current semantic AST intentionally loses some syntax choices. For example,
+`<em>hello</em>` and `*hello*` become the same emphasis node, and the canonical
+writer emits `*hello*`. Native paragraphs can similarly become ordinary Markdown.
+This behavior predates the separate HTML renderer.
+
+For author-facing editing, investigate two distinct fidelity levels:
+
+- **Authored form:** retain whether a node was written as HTML or Markdown, and
+  determine whether the original HTML tag (`em` versus `i`, for example) matters.
+  Keep one editable semantic node with separate provenance rather than creating
+  two unrelated semantic types for the same content.
+- **Source fidelity:** retain delimiter choices, whitespace, quote style, entity
+  spelling and untouched source regions. Define what happens when a node or its
+  descendants change, move, split or merge; this may require a CST or retained
+  source ranges with edit tracking.
+
+Decide the default and compatibility contract before implementing either level:
+canonical writing, authored-form writing, or separate explicit modes. Check the
+public proposal’s AST/source and writer rules in a specification task before
+turning a research candidate into a language requirement. The existing optional
+`source` field is a place to investigate, not an already-approved preservation
+schema.
+
+Keep unsafe discarded HTML discarded. Neither authored-form hints nor retained
+source may replay scripts, event handlers, rejected URLs or filtered attributes.
+Measure storage, parse/write cost and editor behavior, and test mixed HTML/Markdown
+nesting, edits to HTML-origin nodes, newly created nodes, and sanitization. Report
+which fidelity level the experiment actually preserves; semantic round-trip tests
+alone do not prove source-form preservation.
+
 ## Decide whether syntax plugins are needed
 
 First test whether an existing `container`, `inline` or `leaf` semantic subtype
