@@ -45,6 +45,10 @@ export function sanitizeHtml(value: string, options: ConversionOptions = {}): st
   if (output !== value) warn(options, "html-filtered", "HTML was normalized or filtered by the safe documentation HTML profile.");
   return output;
 }
+export function sanitizeLiteral(value: string, options: ConversionOptions = {}): string {
+  // Plain recovery source cannot contain HTML; preserve its Markdown punctuation.
+  return value.includes("<") ? sanitizeHtml(value,options):value;
+}
 export function safeUrl(url: string, image = false): boolean {
   const attribute = image ? "src" : "href";
   const tag = image ? "img" : "a";

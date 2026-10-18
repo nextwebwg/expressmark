@@ -1,25 +1,22 @@
 import { stringify as yamlStringify } from "yaml";
 import { diagnoseIds, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
-import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeHtml } from "./html.js";
+import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { tableGrid, transposeTable } from "./tables.js";
 import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
 import { ConversionError, warn } from "./types.js";
 
 function fail(message: string): never { throw new ConversionError("unsupported-conversion",message); }
-function escapeText(value: string): string { return value.replace(/&(?=(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);)/g,"&amp;").replace(/[\\`*_[\]{}<>~|@:]/g,"\\$&").replace(/(^|\n)([ \t]*)([#>+\-=])/g,"$1$2\\$3"); }
+function escapeText(value: string): string {
+  return value.replace(/&(?=(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);)/g,"&amp;")
+    .replace(/[\\`*_[\]{}<>~|@:]/g,"\\$&")
+    .replace(/(^|\n)([ \t]*)([#>+\-=])/g,"$1$2\\$3")
+    .replace(/(^|\n)([ \t]*\d{1,9})([.)])(?=[ \t]|$)/g,"$1$2\\$3");
+}
 function inlineCode(value: string): string {
   const length=Math.max(0,...Array.from(value.matchAll(/`+/g),m=>m[0].length))+1;
   const fence="`".repeat(length);
   const padding=/^`|`$/.test(value) || (/^ | $/.test(value) && /[^ ]/.test(value)) ? " " : "";
   return `${fence}${padding}${value}${padding}${fence}`;
-}
-function tableContent(value: string): string {
-  let output="", backslashes=0;
-  for(const char of value) {
-    if(char === "|" && backslashes % 2 === 0) output+="\\";
-    output+=char;
-    backslashes=char === "\\" ? backslashes+1:0;
-  }
-  return output;
 }
 function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {}): string {
   const values: Record<string,string|boolean|number>={...node.attributes,...extra};
@@ -220,7 +217,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     fail(`Unsupported inline node: ${node.type}.`);
   }
   function depth(node: Node): number {
-    return (node.type === "container" ? 1:0)+Math.max(0,...(node.body ?? node.children ?? []).map(depth));
+    return (["container","table"].includes(node.type) ? 1:0)+Math.max(0,...(node.body ?? node.children ?? []).map(depth));
   }
   function list(node: Node): string {
     if(typeof node.ordered !== "boolean" || !Array.isArray(node.children) || node.children.some(item=>item.type !== "listItem")) fail("Lists need ordered and listItem children.");
@@ -231,41 +228,63 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       if(item.id !== undefined || item.attributes) fail("List-item attributes need a native list wrapper.");
       const prefix=node.ordered ? `${start+index}. `:"- ";
       const task=item.checked === undefined ? "" : `[${item.checked ? "x":" "}] `;
-      const text=blockArray(item.body ?? []);
+      const text=blockArray(item.body ?? [],node.tight === true);
       return `${prefix}${task}${text.replace(/\n/g,`\n${" ".repeat(prefix.length)}`)}`;
     }).join(node.tight === true ? "\n":"\n\n");
   }
   function table(node: Node): string {
+    const grid=tableGrid(node);
     const rows=node.children ?? [];
-    if(!rows.length || rows.some(row=>row.type !== "tableRow")) fail("A table needs tableRow children and a header row.");
-    const rich=rows[0]?.children?.some(cell=>!cell.header) || rows.slice(1).some(row=>row.children?.some(cell=>cell.header)) || node.id !== undefined || node.attributes || node.title || rows.some(row=>row.id !== undefined || row.attributes || row.children?.some(cell=>cell.id !== undefined || cell.attributes || cell.body));
-    const width=node.align?.length ?? rows[0]!.children?.reduce((sum,cell)=>sum+(cell.colSpan ?? 1),0) ?? 0;
-    if(width<1) fail("A table needs a positive grid width.");
-    const headerEnd=rows.findIndex(row=>row.children?.some(cell=>!cell.header));
-    const grid:(Node|undefined)[][]=rows.map(()=>Array<Node|undefined>(width).fill(undefined));
-    const source:string[][]=rows.map(()=>Array<string>(width).fill(""));
-    for(let r=0;r<rows.length;r++) {
-      let c=0;
-      for(const cell of rows[r]!.children ?? []) {
-        if(cell.type !== "tableCell") fail("Table rows need tableCell children.");
-        while(grid[r]![c]) c++;
-        const w=cell.colSpan ?? 1,h=cell.rowSpan ?? 1;
-        if(!Number.isInteger(w)||!Number.isInteger(h)||w<1||h<1||c+w>width||r+h>rows.length) fail("Invalid table span rectangle.");
-        if(headerEnd>0 && r<headerEnd && r+h>headerEnd) fail("A table span cannot cross its header/body boundary.");
-        if(!rich && (r===0 && h>1 || r>0 && cell.header)) fail("Pipe tables require one header row and no header/body-crossing spans.");
-        for(let y=r;y<r+h;y++) for(let x=c;x<c+w;x++) {
-          if(grid[y]![x]) fail("Table spans overlap."); grid[y]![x]=cell;
-          source[y]![x]=y>r ? "^" : x<c+w-1 ? ">":tableContent(content(cell));
-        }
-        if(w===1 && h===1 && /^[>^]$/.test(source[r]![c]!)) source[r]![c]=`\\${source[r]![c]}`;
-        c+=w;
-      }
-      if(grid[r]!.some(cell=>!cell)) fail("Every table row must resolve to the same grid width.");
+    const needsNative=rows.some(row=>row.id !== undefined || row.attributes || row.children?.some(cell=>cell.id !== undefined || cell.attributes || cell.header === false || cell.rowSpan === 1 || cell.colSpan === 1))
+      || !grid.length && node.align !== undefined
+      || ["header","transpose","align"].some(key=>Object.hasOwn(node.attributes ?? {},key));
+    if(needsNative) return safeNative(node);
+    const headerRow=(grid: Node[][])=>grid.length>0 && grid[0]!.every(cell=>cell.header === true) && grid.slice(1).every(row=>row.every(cell=>!cell.header));
+    const hasHeaders=grid.some(row=>row.some(cell=>cell.header));
+    let sourceGrid=grid;
+    let transpose=false;
+    if(hasHeaders && !headerRow(grid)) {
+      const inverse=transposeTable(node);
+      sourceGrid=tableGrid(inverse);
+      if(!headerRow(sourceGrid)) return safeNative(node);
+      transpose=true;
     }
-    if(rich) return safeNative(node);
-    const lines=source.map(row=>`| ${row.join(" | ")} |`);
-    lines.splice(1,0,`| ${Array.from({length:width},(_,i)=>node.align?.[i] === "left" ? ":---" : node.align?.[i] === "right" ? "---:" : node.align?.[i] === "center" ? ":---:":"---").join(" | ")} |`);
-    return lines.join("\n");
+    const header=headerRow(sourceGrid);
+    const noMerges=sourceGrid.every(row=>row.every(cell=>!cell.rowSpan && !cell.colSpan));
+    const labels=sourceGrid[0]?.map(cell=>cell.value) ?? [];
+    const named=!transpose && header && sourceGrid.length>1 && noMerges
+      && labels.every(value=>typeof value === "string" && Boolean(value.trim()) && !/[\r\n]/.test(value) && value.trim() === value)
+      && new Set(labels).size === labels.length;
+    const settings: Attributes={};
+    if(header && !named) settings.header=true;
+    if(transpose) settings.transpose=true;
+    if(node.align) settings.align=node.align.map(value=>value ?? "-").join(",");
+    const cellSource=(cell: Node)=> {
+      const value=cell.body ? blockArray(cell.body):content(cell);
+      return /^[>^]$/.test(value) ? `\\${value}`:value;
+    };
+    let body: string;
+    if(named) {
+      body=sourceGrid.slice(1).map(row=>row.map((cell,index)=> {
+        const label=labels[index]!.replace(/[\\:]/g,"\\$&");
+        const value=cellSource(cell);
+        // Keep blocks on indented continuation lines, including code and lists.
+        return `${index === 0 ? "- ":"  "}${label}:${value ? `\n${value.split("\n").map(line=>`    ${line}`).join("\n")}`:""}`;
+      }).join("\n")).join("\n\n");
+    } else {
+      const seen=new Set<Node>();
+      body=sourceGrid.map((row,r)=>row.map((cell,c)=> {
+        if(r>0 && sourceGrid[r-1]![c] === cell) return "^";
+        if(c+1<row.length && row[c+1] === cell) return ">";
+        if(seen.has(cell)) fail("Repeated table origin.");
+        seen.add(cell);
+        return cellSource(cell);
+      }).map((value,index)=>`${index === 0 ? "- -":"  -"}${value ? ` ${value.replace(/\n/g,"\n    ")}`:""}`).join("\n")).join("\n\n");
+    }
+    const fence=":".repeat(2+depth(node));
+    const attributes=writeAttributes(node,settings);
+    const heading=["table",node.title !== undefined ? `[${caption(node)}]`:undefined,attributes].filter(Boolean).join(" ");
+    return `${fence} ${heading}\n\n${body}${body ? "\n\n":""}${fence}`;
   }
   function block(node: Node, forceTabsWrapper = false): string {
     if(node.type === "paragraph") {
@@ -305,11 +324,20 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "table") return table(node);
     if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return sanitizeHtml(node.value ?? "",options); }
     if(node.type === "group") return safeNative(node);
-    if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeHtml(node.value ?? "",options); }
+    if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeLiteral(node.value ?? "",options); }
     fail(`Unsupported block node: ${node.type}.`);
   }
-  function blockArray(nodes: Node[]): string {
-    return nodes.map((node,index)=>block(node,node.type === "container" && node.subType === "tabs" && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs"))).filter(Boolean).join("\n\n");
+  function blockArray(nodes: Node[], tightList = false): string {
+    const blocks=nodes.map((node,index)=> {
+      const neighboringTabs=node.type === "container" && node.subType === "tabs"
+        && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
+      return {node,value:block(node,neighboringTabs)};
+    }).filter(({value})=>Boolean(value));
+    // A blank line before an item's nested list would loosen the outer list.
+    return blocks.map(({node,value},index)=> {
+      const adjacent=tightList && node.type === "list" && blocks[index-1]?.node.type === "paragraph";
+      return `${index === 0 ? "" : adjacent ? "\n":"\n\n"}${value}`;
+    }).join("");
   }
   const metadata={...document.metadata};
   if(document.id !== undefined) {
