@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
   <title id="title">Expressmark: Markdown you can work with.</title>
-  <desc id="desc">Markdown source becomes editable document data, and the same data can be written back to Markdown.</desc>
+  <desc id="desc">Parse Markdown into editable document data, write it back to Markdown, or render HTML with per-node transformers.</desc>
   <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#d6dfdf" stroke-width="0.6"/></pattern><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="m0 0 8 4-8 4" fill="none" stroke="#395f60" stroke-width="1.5"/></marker></defs>
   <rect width="1200" height="360" rx="20" fill="#f2f5ee"/>
   <rect width="1200" height="360" rx="20" fill="url(#grid)"/>
@@ -8,20 +8,28 @@
   <path d="M59 66V51l12 12 12-12v15" fill="none" stroke="#e5edb5" stroke-width="3" stroke-linejoin="round"/>
   <text x="112" y="73" fill="#173f40" font-family="system-ui, sans-serif" font-size="43" font-weight="750" letter-spacing="-1.5">expressmark</text>
   <text x="48" y="124" fill="#395f60" font-family="system-ui, sans-serif" font-size="24">Markdown you can work with.</text>
-  <text x="1150" y="58" text-anchor="end" fill="#395f60" font-family="ui-monospace, monospace" font-size="13" letter-spacing="2">SOURCE ↔ STRUCTURE</text>
-  <rect x="48" y="159" width="460" height="150" rx="12" fill="#173f40"/>
-  <text x="72" y="187" fill="#b9ccc5" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">AUTHOR IN MARKDOWN</text>
-  <text x="72" y="222" fill="#e5edb5" font-family="ui-monospace, monospace" font-size="18">::: warning [Heads up]</text>
-  <text x="72" y="251" fill="#f2f5ee" font-family="ui-monospace, monospace" font-size="18">Make it your own.</text>
-  <text x="72" y="280" fill="#e5edb5" font-family="ui-monospace, monospace" font-size="18">:::</text>
-  <path d="M539 214h120" stroke="#395f60" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M659 259H539" stroke="#395f60" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="600" y="201" text-anchor="middle" fill="#395f60" font-family="ui-monospace, monospace" font-size="13">parse</text>
-  <text x="600" y="282" text-anchor="middle" fill="#395f60" font-family="ui-monospace, monospace" font-size="13">stringify</text>
-  <rect x="692" y="159" width="460" height="150" rx="12" fill="#e5edb5"/>
-  <text x="716" y="187" fill="#395f60" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">EDIT AS DOCUMENT DATA</text>
-  <text x="716" y="222" fill="#173f40" font-family="ui-monospace, monospace" font-size="18">{ type: "container",</text>
-  <text x="716" y="251" fill="#a0482d" font-family="ui-monospace, monospace" font-size="18">  subType: "warning",</text>
-  <text x="716" y="280" fill="#173f40" font-family="ui-monospace, monospace" font-size="18">  body: […] }</text>
+  <text x="1150" y="58" text-anchor="end" fill="#395f60" font-family="ui-monospace, monospace" font-size="13" letter-spacing="2">SOURCE ↔ STRUCTURE → HTML</text>
+  <rect x="48" y="159" width="302" height="150" rx="12" fill="#173f40"/>
+  <text x="70" y="187" fill="#b9ccc5" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">MARKDOWN</text>
+  <text x="70" y="222" fill="#e5edb5" font-family="ui-monospace, monospace" font-size="17">::: warning [Heads up]</text>
+  <text x="70" y="251" fill="#f2f5ee" font-family="ui-monospace, monospace" font-size="17">Make it your own.</text>
+  <text x="70" y="280" fill="#e5edb5" font-family="ui-monospace, monospace" font-size="17">:::</text>
+  <path d="M368 214h54" stroke="#395f60" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M422 259h-54" stroke="#395f60" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="395" y="201" text-anchor="middle" fill="#395f60" font-family="ui-monospace, monospace" font-size="12">parse</text>
+  <text x="395" y="282" text-anchor="middle" fill="#395f60" font-family="ui-monospace, monospace" font-size="12">stringify</text>
+  <rect x="441" y="159" width="302" height="150" rx="12" fill="#fffdf8" stroke="#b9ccc5"/>
+  <text x="463" y="187" fill="#395f60" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">EDITABLE AST</text>
+  <text x="463" y="222" fill="#173f40" font-family="ui-monospace, monospace" font-size="17">{ type: "container",</text>
+  <text x="463" y="251" fill="#a0482d" font-family="ui-monospace, monospace" font-size="17">  subType: "warning",</text>
+  <text x="463" y="280" fill="#173f40" font-family="ui-monospace, monospace" font-size="17">  body: […] }</text>
+  <path d="M761 236h69" stroke="#395f60" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="795" y="216" text-anchor="middle" fill="#395f60" font-family="ui-monospace, monospace" font-size="12">renderHtml</text>
+  <text x="795" y="263" text-anchor="middle" fill="#395f60" font-family="ui-monospace, monospace" font-size="11">transform nodes</text>
+  <rect x="850" y="159" width="302" height="150" rx="12" fill="#e5edb5"/>
+  <text x="872" y="187" fill="#395f60" font-family="ui-monospace, monospace" font-size="12" letter-spacing="2">YOUR HTML</text>
+  <text x="872" y="222" fill="#173f40" font-family="ui-monospace, monospace" font-size="17">&lt;aside class="notice"&gt;</text>
+  <text x="872" y="251" fill="#173f40" font-family="ui-monospace, monospace" font-size="17">  Make it your own.</text>
+  <text x="872" y="280" fill="#173f40" font-family="ui-monospace, monospace" font-size="17">&lt;/aside&gt;</text>
   <text x="48" y="339" fill="#395f60" font-family="system-ui, sans-serif" font-size="13">EXPRESSIVE MARKDOWN · TYPESCRIPT · ESM · MIT</text>
 </svg>
