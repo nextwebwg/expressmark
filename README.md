@@ -43,7 +43,7 @@ Back up the database first.
 
 ## Make the HTML your own
 
-**New for 0.1.2; not yet in the published 0.1.1 package.** Import the separate
+**Available from 0.1.2.** Import the separate
 renderer and override only the node types you need:
 
 ```ts
@@ -90,7 +90,7 @@ group or inherit it from the surrounding HTML. `lang` alone does not set directi
 `parse` and `stringify` preserve layout data; `renderHtml` supplies native logical
 CSS. [Layout examples and browser verification](docs/html-transformers.md#layout)
 cover Arabic, Hebrew, nested direction changes and child overrides. This built-in
-rendering is targeted for 0.1.2.
+rendering is available from 0.1.2.
 
 ## What you can write
 

@@ -2,8 +2,7 @@
 
 `renderHtml(document, options?)` from `expressmark/render` renders a version-1
 Expressmark document to a sanitized HTML fragment. Override one node type while
-keeping the defaults everywhere else. This entry point is new for 0.1.2 and is not
-available in the published 0.1.1 package.
+keeping the defaults everywhere else. This entry point is available from 0.1.2.
 
 ```ts
 import { parse } from "expressmark";
