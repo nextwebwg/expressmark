@@ -1,5 +1,6 @@
-import sanitize from "sanitize-html";
+// Evaluate the ESM parser before sanitize-html requires it on the Node 22 floor.
 import { parseDocument } from "htmlparser2";
+import sanitize from "sanitize-html";
 import { attributeKey, compact } from "./grammar.js";
 import type { ConversionOptions, Node } from "./types.js";
 import { warn } from "./types.js";
