@@ -310,7 +310,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
               if(position === content.length && candidates.length) { attached.push(...candidates); content=content.slice(0,i).trimEnd(); break; }
             }
           }
-          const node=compact(token.type === "paragraph_open" ? {type:"paragraph"} : {type:"heading",level:Number(token.tag.slice(1))},inline(content));
+          // The block pass already parsed inline content. Reparse only when
+          // removing heading attachments changes the represented source.
+          const children=content === inner.content && inner.children ? inlineTokens(inner.children):inline(content);
+          const node=compact(token.type === "paragraph_open" ? {type:"paragraph"} : {type:"heading",level:Number(token.tag.slice(1))},children);
           for(const attrs of attached) attach(node,attrs);
           if(token.type === "paragraph_open") { const task=/^\[([ xX])\][ \t]+/.exec(content); if(task) tasks.set(node,task); }
           cursor++; nodes.push(node);

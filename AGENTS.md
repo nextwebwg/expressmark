@@ -21,3 +21,11 @@
   workflow on `main`. Never publish from a dirty source tree or a feature branch.
 - Keep private consumer context and motivating project names out of public examples,
   templates, fixtures and documentation.
+
+## Future exploration
+
+- Keep markdown-it internal; do not expose parser plugins without an explicit task
+  revisiting that decision. Prefer standard semantic types and node rendering.
+- Read [the exploration backlog](docs/future-exploration.md) before investigating
+  Parseman replacement, parser speed claims, or a future extension system. Its
+  research questions are not approved migrations or language requirements.

@@ -92,3 +92,10 @@ it("keeps inline extensions within native wrappers and blockifies disclosure/fig
   expect(document.body[2]).toMatchObject({subType:"figure",body:[{type:"paragraph",children:[{type:"image"}]}]});
   expect(parse(stringify(document))).toEqual(document);
 });
+
+it("reports inline attachment diagnostics once when reusing parsed tokens", () => {
+  const diagnostics: unknown[] = [];
+  const document = parse("A :chip[Ready]{tone=red tone=green}.", { onDiagnostic: diagnostic => diagnostics.push(diagnostic) });
+  expect(document.body[0]?.children?.[1]).toMatchObject({ type: "inline", subType: "chip", attributes: { tone: "green" } });
+  expect(diagnostics).toEqual([expect.objectContaining({ code: "duplicate-attribute" })]);
+});
