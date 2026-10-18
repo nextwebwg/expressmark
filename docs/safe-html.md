@@ -42,6 +42,11 @@ Inline CSS permits only these properties and value classes:
 | `font-style` | `normal italic` |
 | `text-decoration` | `none underline line-through` |
 | `white-space` | `normal pre pre-wrap pre-line break-spaces` |
+| `display` | `flow-root` |
+| `float` | `inline-start inline-end` |
+| `inline-size` | The supported size values above, or `fit-content` |
+| `max-inline-size` | The supported size values above |
+| `margin-inline-start`, `margin-inline-end` | `0 auto` |
 
 Unsupported CSS is removed. This profile does not make arbitrary HTML, CSS or
 application-provided renderers safe; applications must keep their output policy.
@@ -62,7 +67,10 @@ The payload cannot replace a node type, body, identity or semantic reference.
 The same validation applies when writing. It never saves discarded HTML for replay.
 
 `span`/`section` with `data-type` map to inline/container semantic subtypes;
-mention `data-ref` supplies its opaque reference. Tool-generated native tables may
+`div[data-type="layout"]` maps to a layout container and restores `data-align`
+and `data-float` as ordinary layout attributes. These wrappers may include the
+bounded native logical CSS used by the layout renderer. Mention `data-ref`
+supplies its opaque reference. Tool-generated native tables may
 carry `data-align` with their JSON column alignments. These are native import/export
 profile conventions. They do not introduce new Expressive Markdown punctuation.
 

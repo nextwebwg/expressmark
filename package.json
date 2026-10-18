@@ -29,17 +29,19 @@
     "test": "pnpm build && vitest run",
     "test:package": "pnpm build && vitest run tests/package.test.ts",
     "verify:inner": "pnpm lint && pnpm typecheck",
-    "verify:pr": "pnpm verify:inner && pnpm test",
+    "verify:pr": "pnpm verify:inner && pnpm test && pnpm test:browser",
     "verify:release": "pnpm verify:pr",
     "check:freshness": "npm outdated --json",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "test:browser": "vitest run --config vitest.browser.config.ts --maxWorkers=1"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
     "@types/sanitize-html": "2.16.2",
     "oxlint": "1.81.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.0"
+    "vitest": "5.0.0",
+    "playwright": "1.64.0"
   },
   "publishConfig": {
     "access": "public",

@@ -18,7 +18,12 @@ const policy: sanitize.IOptions = {
     details: ["open"], ol: ["start"], li: ["value"],
     td: ["colspan", "rowspan", "headers"], th: ["colspan", "rowspan", "scope", "headers"],
   },
-  allowedStyles: {"*": {color:[color], "background-color":[color], "text-align":[/^(?:left|right|center|justify|start|end)$/], "vertical-align":[/^(?:top|middle|bottom|baseline)$/], width:[size], height:[size], "max-width":[size], "font-weight":[/^(?:normal|bold|[1-9]00)$/], "font-style":[/^(?:normal|italic)$/], "text-decoration":[/^(?:none|underline|line-through)$/], "white-space":[/^(?:normal|pre|pre-wrap|pre-line|break-spaces)$/]}},
+  allowedStyles: {"*": {color:[color], "background-color":[color], "text-align":[/^(?:left|right|center|justify|start|end)$/], "vertical-align":[/^(?:top|middle|bottom|baseline)$/], width:[size], height:[size], "max-width":[size], "font-weight":[/^(?:normal|bold|[1-9]00)$/], "font-style":[/^(?:normal|italic)$/], "text-decoration":[/^(?:none|underline|line-through)$/], "white-space":[/^(?:normal|pre|pre-wrap|pre-line|break-spaces)$/],
+    // Layout uses native flow and logical axes, without positioning or arbitrary CSS.
+    display:[/^flow-root$/], float:[/^inline-(?:start|end)$/],
+    "inline-size":[size,/^fit-content$/], "max-inline-size":[size],
+    "margin-inline-start":[/^(?:0|auto)$/], "margin-inline-end":[/^(?:0|auto)$/],
+  }},
   transformTags: {
     "*": (tagName, original) => {
       const attribs={...original};
@@ -65,7 +70,8 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
     if (raw.type === "text") return raw.data ? [{type:"text",value:raw.data}] : [];
     if (!("name" in raw) || !("children" in raw)) return [];
     const tag = raw.name;
-    const children = raw.children.flatMap(child=>convert(child,tag === "section" && raw.attribs["data-type"] ? "semantic-section":tag));
+    const semanticContainer = tag === "section" && raw.attribs["data-type"] || tag === "div" && raw.attribs["data-type"] === "layout";
+    const children = raw.children.flatMap(child=>convert(child,semanticContainer ? "semantic-section":tag));
     const attributes: Record<string,string|boolean> = {};
     let id: string | undefined;
     for (const [key,value] of Object.entries(raw.attribs)) {
@@ -112,9 +118,13 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
       if(node.subType === "mention" && typeof attributes.dataRef === "string") {node.ref=attributes.dataRef;delete attributes.dataRef;}
       return finish(node);
     }
-    if(tag === "section" && typeof attributes.dataType === "string" && /^[a-z][a-z0-9_-]*$/.test(attributes.dataType)) {
+    if(semanticContainer && typeof attributes.dataType === "string" && /^[a-z][a-z0-9_-]*$/.test(attributes.dataType)) {
       const node: Node={type:"container",subType:attributes.dataType,body:blocks(children.filter(child=>child.type !== "title"))};
       const title=children.find(child=>child.type === "title"); if(title) node.title=title;
+      if(node.subType === "layout") for(const key of ["align","float"] as const) {
+        const dataKey=key === "align" ? "dataAlign":"dataFloat";
+        if(attributes[dataKey] !== undefined) {attributes[key]=attributes[dataKey];delete attributes[dataKey];}
+      }
       delete attributes.dataType;return finish(node);
     }
     if(tag === "header" && parent === "semantic-section") return finish(compact({type:"title"},children));
