@@ -1,7 +1,8 @@
 import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markdown-it";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { attach, compact, diagnoseIds, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
-import { htmlNodes, sanitizeHtml } from "./html.js";
+import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { mergeTable, readListTable, readTableField } from "./tables.js";
 import type { ConversionOptions, Document, Json, Node } from "./types.js";
 import { warn } from "./types.js";
 
@@ -34,6 +35,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
+  // GFM recognizes www-prefixed links, while linkify-it leaves fuzzy URLs off.
+  // Reuse its HTTP boundary rules without also linking arbitrary bare domains.
+  md.linkify.add("www.", {
+    validate(text,position,self) {
+      const length=self.testSchemaAt(`//www.${text.slice(position)}`,"http:",0);
+      return length>6 ? length-6:0;
+    },
+    normalize(match) { match.url=`http://${match.raw}`; },
+  });
   const env: Record<string,unknown> = {};
   const tasks=new WeakMap<Node,RegExpExecArray>();
   let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
@@ -130,9 +140,17 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const length=opening[1]!.length;
     let close=start+1;
     let code: {mark:string;length:number}|undefined;
+    // Let CommonMark locate code/HTML in list and quote contexts too. Jump at
+    // a token's opening line so a named field's inline fence can take priority.
+    const lexical=new MarkdownIt({html:true}).parse(state.getLines(start+1,end,state.blkIndent,false),{});
+    const literalRanges=new Map<number,number>();
+    for(const token of lexical) if(["fence","code_block","html_block"].includes(token.type) && token.map) literalRanges.set(start+1+token.map[0],start+1+token.map[1]);
     for(;close<end;close++) {
       const text=line(state,close);
-      const fence=/^(`{3,}|~{3,})/.exec(text);
+      if(!code && literalRanges.has(close)) { close=literalRanges.get(close)!-1; continue; }
+      const fieldValue=node.subType === "table" ? readTableField(text.replace(/^[-+*][ \t]+/,""))?.value:undefined;
+      const fieldCode=fieldValue === undefined ? undefined:/^(`{3,}|~{3,})/.exec(fieldValue);
+      const fence=/^(`{3,}|~{3,})/.exec(text) ?? fieldCode;
       if(fence) {
         const value=fence[1]!;
         if(!code) code={mark:value[0]!,length:value.length};
@@ -151,6 +169,11 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       state.line=end; return true;
     }
     title(node);
+    if(node.subType === "table") {
+      const body=state.getLines(start+1,close,state.blkIndent,false);
+      state.push("expressive_table","",0).meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()};
+      state.line=close+1; return true;
+    }
     const token=state.push("expressive_container_open","",1); token.meta={node};
     const oldParent=state.parentType;
     state.parentType="container";
@@ -296,7 +319,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const listStart=cursor;
           const node: Node={type:"list",ordered:token.type === "ordered_list_open",tight:true,children:read(token.type.replace("_open","_close"))};
           const start=token.attrGet("start"); if(start !== null && Number(start) !== 1) node.start=Number(start);
-          node.tight=!tokens.slice(listStart,cursor).some(t=>t.type === "paragraph_open" && !t.hidden);
+          // Only direct item paragraphs determine this list's tightness.
+          node.tight=!tokens.slice(listStart,cursor).some(t=>t.type === "paragraph_open" && t.level === token.level+2 && !t.hidden);
           nodes.push(node);
         } else if(token.type === "list_item_open") {
           const body=read("list_item_close");
@@ -327,7 +351,16 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         else if(token.type === "html_block") nodes.push(...htmlNodes(token.content.trimEnd(),"block",options));
         else if(token.type === "expressive_container_open") {
           const node=token.meta!.node as Node; node.body=read("expressive_container_close"); nodes.push(node);
-        } else if(token.type === "expressive_leaf") nodes.push(token.meta!.node as Node);
+        } else if(token.type === "expressive_table") {
+          // Convert after the document block pass has collected link references.
+          const meta=token.meta as {node:Node;body:string;source:string};
+          const table=readListTable(meta.node,meta.body,md,value=>blocks(md.parse(value,env),value));
+          if(typeof table === "string") {
+            nodes.push({type:"literal",display:"block",value:sanitizeLiteral(meta.source,options)});
+            warn(options,"invalid-table",table);
+          } else nodes.push(table);
+        }
+        else if(token.type === "expressive_leaf") nodes.push(token.meta!.node as Node);
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
         else if(token.type === "expressive_line_block") nodes.push(compact({type:"lineBlock"},inline(token.content,true)));
         else if(token.type === "table_open") {
@@ -420,44 +453,6 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   clearAutomatic(document);
   diagnoseIds(document,options);
   return document;
-}
-
-function mergeTable(table: Node, sources: string[][]): string | undefined {
-  const rows=table.children ?? [];
-  const width=rows[0]?.children?.length ?? 0;
-  const grid: (Node|undefined)[][]=rows.map(()=>Array<Node|undefined>(width));
-  for(let r=0;r<rows.length;r++) {
-    const row=rows[r]!; const cells=row.children ?? []; const result:Node[]=[];
-    for(let c=0;c<width;c++) {
-      const marker=sources[r]?.[c]?.trim();
-      if(marker === "^") {
-        if(r <= 1) return "A vertical merge cannot cross the table header boundary.";
-        const above=grid[r-1]?.[c]; if(!above) return "A vertical merge needs an originating cell above.";
-        grid[r]![c]=above;
-        continue;
-      }
-      if(marker === ">") {
-        let next=c; while(sources[r]?.[next]?.trim() === ">") next++;
-        if(next >= width || sources[r]?.[next]?.trim() === "^") return "A horizontal merge must end at ordinary content.";
-        const cell=cells[next]!; cell.colSpan=next-c+1;
-        for(let slot=c;slot<=next;slot++) grid[r]![slot]=cell;
-        result.push(cell); c=next;
-      } else { const cell=cells[c]!; result.push(cell); grid[r]![c]=cell; }
-    }
-    // Every continuation row must cover the full originating rectangle.
-    if(r>0) {
-      const counts=new Map<Node,number>();
-      for(let c=0;c<width;c++) if(sources[r]?.[c]?.trim() === "^") {
-        const cell=grid[r]![c]!; counts.set(cell,(counts.get(cell) ?? 0)+1);
-      }
-      for(const [cell,count] of counts) {
-        if(count !== (cell.colSpan ?? 1)) return "Vertical continuations must cover the full cell width.";
-        cell.rowSpan=(cell.rowSpan ?? 1)+1;
-      }
-    }
-    row.children=result;
-  }
-  return;
 }
 
 function splitRow(line: string): string[] {

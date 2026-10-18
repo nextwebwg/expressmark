@@ -54,6 +54,9 @@ merged table grids. Optional source positions are not currently generated.
 - Mention shorthand with separate entity references and occurrence IDs; chips and authored TOCs.
 - Adjacent `tab` grouping and explicit `tabs` settings, including shared selection names.
 - Leading-pipe line blocks, code captions/presentation attributes, and rectangular merged tables.
+- List-based tables with named or positional rows, rich cell bodies, optional
+  headers, transposition and displayed-column alignment. Writers prefer these
+  forms; GFM pipe tables remain accepted.
 - Safe native HTML for supported rich text, wrappers, figures, disclosures and rich table cells.
 
 This is an implementation of a changing Stage 0 proposal, not a claim of complete
@@ -69,8 +72,7 @@ stores content nodes or restores executable HTML fields. Other unsupported
 structures fail explicitly rather than flattening or silently dropping content.
 Unrecognized safe HTML can remain opaque, with its accepted markup preserved.
 
-The normative [syntax](https://nextwebwg.org/expressive-markdown/language),
-[AST](https://nextwebwg.org/expressive-markdown/ast) and
+The normative [syntax and AST examples](https://nextwebwg.org/expressive-markdown/language) and
 [parser/writer rules](https://nextwebwg.org/expressive-markdown/parsing)
 are maintained in `nextwebwg/specs`.
 

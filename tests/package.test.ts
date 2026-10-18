@@ -34,6 +34,11 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
     expect(JSON.parse(exports)).toEqual(["ConversionError", "parse", "stringify"]);
     const converted = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: warning [Check]\\nBackup first.\\n:::"); console.log(stringify(doc));'], options);
     expect(converted).toContain("warning");
+    const table = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: table {transpose}\\n- Name: Alpha\\n  Role: Reviewer\\n:::"); const markdown=stringify(doc); console.log(JSON.stringify({doc,again:parse(markdown),markdown}));'], options);
+    const result=JSON.parse(table);
+    expect(result.doc.body[0]).toMatchObject({type:"table",children:[{children:[{header:true,value:"Name"},{value:"Alpha"}]},{children:[{header:true,value:"Role"},{value:"Reviewer"}]}]});
+    expect(result.again).toEqual(result.doc);
+    expect(result.markdown).toContain("table");
     writeFileSync(join(consumer, "index.ts"), 'import {parse,stringify,type Document} from "expressmark"; const doc: Document = parse("# Hello"); stringify(doc);\n');
     const tsc = fileURLToPath(new URL("./bin/tsc", import.meta.resolve("typescript/package.json")));
     execFileSync(process.execPath, [tsc, "--strict", "--noEmit", "--skipLibCheck", "--target", "ES2023",

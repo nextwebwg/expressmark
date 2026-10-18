@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2
+
+- Parse and write the list-based table syntax: named column identities, mixed
+  positional records, rich cell bodies, headers, transposition, alignment and
+  rectangular merges. Preserve malformed tables as whole-source recovery nodes.
+- Keep code and HTML boundaries intact while locating nested container fences.
+- Add GFM-oriented parser and round-trip coverage for ordinary Markdown, tables,
+  tasks, strikethrough, autolinks and Expressive Markdown precedence.
+- Recognize `www.` autolinks, preserve nested-list tightness, and escape literal
+  numbered list markers during writing.
+
 ## 0.1.1
 
 - Preserve spaces inside formatting, adjacent and nested marks, empty paragraphs,
