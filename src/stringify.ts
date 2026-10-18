@@ -5,7 +5,7 @@ import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
 import { ConversionError, warn } from "./types.js";
 
 function fail(message: string): never { throw new ConversionError("unsupported-conversion",message); }
-function escapeText(value: string): string { return value.replace(/[\\`*_[\]{}<>~|@:]/g,"\\$&").replace(/(^|\n)([ \t]*)([#>+\-=])/g,"$1$2\\$3"); }
+function escapeText(value: string): string { return value.replace(/&(?=(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);)/g,"&amp;").replace(/[\\`*_[\]{}<>~|@:]/g,"\\$&").replace(/(^|\n)([ \t]*)([#>+\-=])/g,"$1$2\\$3"); }
 function inlineCode(value: string): string {
   const length=Math.max(0,...Array.from(value.matchAll(/`+/g),m=>m[0].length))+1;
   const fence="`".repeat(length);
@@ -122,7 +122,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(Object.hasOwn(metadata,"title") && document.title === undefined) fail("metadata.title has no independent source mapping; use the document title field.");
   }
   diagnoseIds(document,options);
-  function content(node: Node): string { return node.value !== undefined ? escapeText(node.value) : (node.children ?? []).map(inline).join(""); }
+  function content(node: Node): string {
+    const children=node.children ?? [];
+    return node.value !== undefined ? escapeText(node.value) : children.map((child,index)=>inline(child,children[index-1],children[index+1])).join("");
+  }
   function caption(node: Node): string {
     if(typeof node.title === "object" && node.title !== null && (node.title.id !== undefined || node.title.attributes || ["container","leaf"].includes(node.type) && /[\r\n]|^[ \t]|[ \t]$/.test(content(node.title)))) fail("A title's own attributes have no bracket-title source mapping.");
     return typeof node.title === "object" && node.title !== null ? content(node.title) : typeof node.title === "string" ? escapeText(node.title) : ""; }
@@ -172,7 +175,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(clean !== raw) warn(options,"presentation-filtered","Native presentation was normalized or filtered by the safe HTML profile.");
     return clean;
   }
-  function inline(node: Node): string {
+  function inline(node: Node, previous?: Node, next?: Node): string {
     const attrs=writeAttributes(node);
     if(["link","image"].includes(node.type) && !safeUrl(node.url ?? "",node.type === "image")) {
       warn(options,"unsafe-url","An unsafe link or image URL was removed.");
@@ -180,9 +183,17 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     }
     if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}); return escapeText(node.value ?? ""); }
     if(["strong","emphasis","delete"].includes(node.type)) {
-      if(attrs) return safeNative(node);
+      const marks=["strong","emphasis","delete"];
+      // Delimiter runs can lose padded text or merge adjacent/nested marks.
+      // Keep their exact boundaries with the existing semantic HTML mapping.
+      if(attrs || node.children?.some(child=>marks.includes(child.type))
+        || marks.includes(previous?.type ?? "") || marks.includes(next?.type ?? "")) return safeNative(node);
+      const value=content(node);
+      if(!value || /^\s|\s$/u.test(value)
+        || /^[\p{P}\p{S}]/u.test(value) && previous?.type === "text" && /[^\s\p{P}\p{S}]$/u.test(previous.value ?? "")
+        || /[\p{P}\p{S}]$/u.test(value) && next?.type === "text" && /^[^\s\p{P}\p{S}]/u.test(next.value ?? "")) return safeNative(node);
       const mark=node.type === "strong" ? "**" : node.type === "emphasis" ? "*":"~~";
-      return `${mark}${content(node)}${mark}`;
+      return `${mark}${value}${mark}`;
     }
     if(["underline","highlight","group"].includes(node.type)) return safeNative(node);
     if(node.type === "inlineCode") return attrs ? safeNative(node) : inlineCode(node.value ?? "");
@@ -257,7 +268,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     return lines.join("\n");
   }
   function block(node: Node, forceTabsWrapper = false): string {
-    if(node.type === "paragraph") return node.id !== undefined || node.attributes ? safeNative(node):content(node);
+    if(node.type === "paragraph") {
+      const value=content(node);
+      return node.id !== undefined || node.attributes || !value.trim() ? safeNative(node):value;
+    }
     if(node.type === "heading") {
       if(!Number.isInteger(node.level)||node.level!<1||node.level!>6) fail("Heading level must be 1 through 6.");
       return `${"#".repeat(node.level!)} ${content(node)}${writeAttributes(node) ? ` ${writeAttributes(node)}`:""}`;
