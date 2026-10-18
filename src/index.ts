@@ -1,3 +1,4 @@
-// An ESM entry point reserves the package without advertising an unfinished API.
-// oxlint-disable-next-line unicorn/require-module-specifiers
-export {};
+export { parse } from "./parse.js";
+export { stringify } from "./stringify.js";
+export { ConversionError } from "./types.js";
+export type { Attributes, ConversionOptions, Diagnostic, Document, Json, Node, Point, Position } from "./types.js";
