@@ -268,7 +268,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     return lines.join("\n");
   }
   function block(node: Node, forceTabsWrapper = false): string {
-    if(node.type === "paragraph") return node.id !== undefined || node.attributes ? safeNative(node):content(node);
+    if(node.type === "paragraph") {
+      const value=content(node);
+      return node.id !== undefined || node.attributes || !value.trim() ? safeNative(node):value;
+    }
     if(node.type === "heading") {
       if(!Number.isInteger(node.level)||node.level!<1||node.level!>6) fail("Heading level must be 1 through 6.");
       return `${"#".repeat(node.level!)} ${content(node)}${writeAttributes(node) ? ` ${writeAttributes(node)}`:""}`;

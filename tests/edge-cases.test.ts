@@ -27,6 +27,11 @@ it("keeps literal character-reference text rather than decoding it on reparse",(
   expect(parse(stringify(document as never))).toEqual(document);
   expect(stringify(document as never)).toContain("A & B");
 });
+it("preserves empty and whitespace-only paragraphs between authored blocks",()=> {
+  const document={type:"document",version:1,body:[{type:"paragraph",value:"Before"},
+    {type:"paragraph",value:""},{type:"paragraph",value:" \t"},{type:"paragraph",value:"After"}]} as const;
+  expect(parse(stringify(document as never))).toEqual(document);
+});
 
 it("keeps unknown safe native elements stable through canonical writing",()=> {
   const document=parse('A <abbr title="Application Programming Interface">API</abbr>.\n\n<aside>Safe <kbd>Enter</kbd>.</aside>');

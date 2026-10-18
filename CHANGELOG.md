@@ -2,8 +2,8 @@
 
 ## 0.1.1
 
-- Preserve spaces inside formatting, adjacent and nested marks, and literal
-  character-reference text when writing and reparsing documents.
+- Preserve spaces inside formatting, adjacent and nested marks, empty paragraphs,
+  and literal character-reference text when writing and reparsing documents.
 
 ## 0.1.0
 
