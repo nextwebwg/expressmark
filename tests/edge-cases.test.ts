@@ -73,6 +73,16 @@ it("preserves explicitly plain URL and email text without creating autolinks",()
     expect(parse(output)).toEqual(document);
   }
 });
+it("preserves literal text split across adjacent nodes without mutating the AST",()=> {
+  for(const values of [["https","://example.test"],["www",".example.test"],[":ch","ip[Ready]"]]) {
+    for(const emptyAttributes of [false,true]) {
+      const document: Document={type:"document",version:1,body:[{type:"paragraph",children:values.map(value=>({type:"text",value,...(emptyAttributes ? {attributes:{}}:{})}))}]};
+      const original=structuredClone(document);
+      expect(parse(stringify(document))).toEqual({type:"document",version:1,body:[{type:"paragraph",value:values.join("")}]});
+      expect(document).toEqual(original);
+    }
+  }
+});
 it("preserves ordinary document spacing, nested lists, tables, containers and tabs",()=> {
   for(const source of [
     "# Heading\n\nFirst paragraph.\n\nSecond paragraph.",

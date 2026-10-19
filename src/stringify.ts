@@ -132,7 +132,15 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   }
   diagnoseIds(document,options);
   function content(node: Node, protectAutolinks = true): string {
-    const children=node.children ?? [];
+    // Adjacent unstyled text has no source boundary. Escape its combined text
+    // so split URL/directive prefixes cannot acquire meaning during writing.
+    const children: Node[]=[];
+    for(const child of node.children ?? []) {
+      const previous=children.at(-1);
+      if(child.type === "text" && !writeAttributes(child) && previous?.type === "text" && !writeAttributes(previous)) {
+        children[children.length-1]={...previous,value:previous.value!+child.value!};
+      } else children.push(child);
+    }
     return node.value !== undefined ? escapeText(node.value,undefined,protectAutolinks) : children.map((child,index)=>inline(child,children[index-1],children[index+1],protectAutolinks)).join("");
   }
   function caption(node: Node): string {
