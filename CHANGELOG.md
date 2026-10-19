@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Use logical `start`, `center` and `end` table alignment in source settings,
+  AST values and HTML metadata round trips. Normalize GFM alignment markers
+  to the same logical values and reject physical `left`/`right` settings.
+
 ## 0.1.4
 
 - Recognize mentions exclusively through `@` syntax. The replaced `:mention`
