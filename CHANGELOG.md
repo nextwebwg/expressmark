@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Write ordinary prose colons without backslashes while preserving literal text
+  that could otherwise become directive syntax.
+- Write simple link and image destinations without unnecessary angle brackets;
+  retain delimiters for destinations that need them.
+
 ## 0.1.2
 
 - Render layout containers with logical alignment and whole-group floating;

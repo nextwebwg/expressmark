@@ -6,10 +6,13 @@ import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
 import { ConversionError, warn } from "./types.js";
 
 function fail(message: string): never { throw new ConversionError("unsupported-conversion",message); }
-function escapeText(value: string): string {
+function escapeText(value: string, next?: Node): string {
   return value.replace(/&(?=(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);)/g,"&amp;")
-    .replace(/[\\`*_[\]{}<>~|@:]/g,"\\$&")
-    .replace(/(^|\n)([ \t]*)([#>+\-=])/g,"$1$2\\$3")
+    .replace(/[\\`*_[\]{}<>~|@]/g,"\\$&")
+    .replace(/(^|\n)([ \t]*)([#>+\-=]|:{2,})/g,"$1$2\\$3")
+    // Prose colons are literal. A following link can supply a directive's
+    // opening bracket across node boundaries, so protect only that junction.
+    .replace(/:[A-Za-z][A-Za-z0-9_-]*$/g,match=>next?.type === "link" ? `\\${match}`:match)
     .replace(/(^|\n)([ \t]*\d{1,9})([.)])(?=[ \t]|$)/g,"$1$2\\$3");
 }
 function inlineCode(value: string): string {
@@ -178,7 +181,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       warn(options,"unsafe-url","An unsafe link or image URL was removed.");
       return node.type === "image" ? escapeText(node.alt ?? "") : content(node);
     }
-    if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}); return escapeText(node.value ?? ""); }
+    if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}); return escapeText(node.value ?? "",next); }
     if(["strong","emphasis","delete"].includes(node.type)) {
       const marks=["strong","emphasis","delete"];
       // Delimiter runs can lose padded text or merge adjacent/nested marks.
@@ -200,7 +203,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       const url=(node.url ?? "").replace(/\\/g,"\\\\").replace(/[<>\n]/g,c=>encodeURIComponent(c));
       const tooltip=typeof node.title === "string" ? ` ${quoteAttribute(node.title)}` : "";
       const label=node.type === "image" ? escapeText(node.alt ?? "") : content(node);
-      return `${node.type === "image" ? "!":""}[${label}](<${url}>${tooltip})${attrs}`;
+      const destination=/[\s()\\]/u.test(url) ? `<${url}>`:url;
+      return `${node.type === "image" ? "!":""}[${label}](${destination}${tooltip})${attrs}`;
     }
     if(node.type === "inline") {
       if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Inline directives need a valid subtype.");

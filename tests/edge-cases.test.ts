@@ -1,5 +1,45 @@
 import { expect, it } from "vitest";
-import { parse, stringify } from "../src/index.js";
+import { parse, stringify, type Document } from "../src/index.js";
+
+it("writes prose colons without unnecessary escapes in paragraphs and lists",()=> {
+  const source="Status: Open question. Meet at 10:30; https://example.test.\n\n- Coral Island: Underground exploration, ore and gems, and combat.\n\n- Fae Farm: Mine expeditions pair materials with creature encounters.";
+  const document=parse(source);
+  const output=stringify(document);
+  expect(output).not.toContain("\\:");
+  expect(parse(output)).toEqual(document);
+});
+it("keeps directive-shaped literal text and text beside links literal",()=> {
+  for(const value of ["::toc","::: warning",":chip[label]{kind=plain}"]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+    {type:"text",value:"Literal :chip"},{type:"link",value:"docs",url:"https://example.test"},
+  ]}]};
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it("writes readable destinations and preserves destinations needing delimiters",()=> {
+  const readable="[Guide](../guides/start.md#setup) and ![Diagram](./assets/diagram.png).";
+  expect(stringify(parse(readable))).toBe(`${readable}\n`);
+  for(const source of ['[Guide](<../guides/start (advanced).md>)', '![Diagram](<./assets/diagram(final).png> "Example")']) {
+    const document=parse(source);
+    const output=stringify(document);
+    expect(output).toContain("(<");
+    expect(parse(output)).toEqual(document);
+  }
+});
+it("keeps ordinary headings, lists, code and semantic inline content readable",()=> {
+  for(const source of [
+    "# Setup: Quick start\n\n- Item: description.\n- Next item: more detail.",
+    "Use `const map = {ready: true}`.\n\n```ts\nconst ready: boolean = true;\n```",
+    "Thanks, @[Ada Lovelace]#user-123. :chip[Ready]",
+  ]) {
+    const document=parse(source);
+    expect(stringify(document)).toBe(`${source}\n`);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
 
 it("preserves marked whitespace and neighboring rich content through Markdown",()=> {
   for(const type of ["strong","emphasis","delete"]) for(const value of ["Hello "," Hello"," ","\tHello\t","\u00a0Hello\u00a0"]) {
