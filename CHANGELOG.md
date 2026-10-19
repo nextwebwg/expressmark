@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+- Recognize mentions exclusively through `@` syntax. The replaced `:mention`
+  directive form remains ordinary Markdown text, including case variants and
+  attribute-only forms. Preserve mention labels, references and occurrence IDs
+  when writing the canonical `@` form.
+- Explain rich document capture and readable Markdown round trips in the README.
+
 ## 0.1.3
 
 - Keep simple named table cells on the same line as their field names while

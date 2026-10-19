@@ -2,8 +2,14 @@
 
 # expressmark
 
-Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/) into an
-editable JSON document, change the data, and write Markdown again.
+Capture rich document metadata and formatting without sacrificing Markdown
+readability. Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/)
+into an editable JSON document, change the data, and write Markdown again.
+
+Build **rich editor → Markdown → rich editor** workflows with explicit
+containers, attributes and YAML frontmatter. Supported block types, titles,
+metadata and formatting stay expressible in the text, so tools can restore that
+context when opening the document again.
 
 **[Quick start](#quick-start)** · **[HTML transformers](#make-the-html-your-own)** ·
 **[Layout](#align-and-float-content)** ·
