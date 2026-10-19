@@ -27,7 +27,7 @@ export interface Node {
   language?: string;
   meta?: string;
   ref?: string;
-  align?: ("left" | "center" | "right" | null)[];
+  align?: ("start" | "center" | "end" | null)[];
   header?: boolean;
   colSpan?: number;
   rowSpan?: number;

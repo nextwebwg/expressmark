@@ -117,7 +117,7 @@ it("preserves malformed regions as literal recovery and reports invalid YAML", (
 });
 
 it("preserves rich-cell custom attributes and authored flag values in safe native fallback", () => {
-  const document={type:"document",version:1,body:[{type:"table",align:["left","right"],children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",colSpan:2,attributes:{columnWidths:"100,120",textAlign:"center",backgroundColor:"#ffeeaa",responsive:false},body:[{type:"paragraph",value:"Rich"},{type:"paragraph",value:"body"}]}]}]}]} as const;
+  const document={type:"document",version:1,body:[{type:"table",align:["start","end"],children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",colSpan:2,attributes:{columnWidths:"100,120",textAlign:"center",backgroundColor:"#ffeeaa",responsive:false},body:[{type:"paragraph",value:"Rich"},{type:"paragraph",value:"body"}]}]}]}]} as const;
   const parsed=parse(stringify(document as never));
   expect(parsed).toEqual(document);
 });
@@ -135,4 +135,9 @@ it("reports inline attachment diagnostics once when reusing parsed tokens", () =
   const document = parse("A :chip[Ready]{tone=red tone=green}.", { onDiagnostic: diagnostic => diagnostics.push(diagnostic) });
   expect(document.body[0]?.children?.[1]).toMatchObject({ type: "inline", subType: "chip", attributes: { tone: "green" } });
   expect(diagnostics).toEqual([expect.objectContaining({ code: "duplicate-attribute" })]);
+});
+
+
+it.each(["left", "right"])("rejects physical table alignment in AST input: %s", alignment => {
+  expect(() => stringify({type:"document",version:1,body:[{type:"table",align:[alignment],children:[]}]} as never)).toThrow(/alignment/);
 });

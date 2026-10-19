@@ -112,15 +112,15 @@ describe("positional list tables",()=> {
 
 describe("table settings and merges",()=> {
   it("transposes named headers into the first displayed column",()=> {
-    check(source('- Name: Alpha\n  Status: Ready','{transpose align="left,right"}'),[
-      {...table(row(cell("Name",true),cell("Alpha")),row(cell("Status",true),cell("Ready"))),align:["left","right"]},
+    check(source('- Name: Alpha\n  Status: Ready','{transpose align="start,end"}'),[
+      {...table(row(cell("Name",true),cell("Alpha")),row(cell("Status",true),cell("Ready"))),align:["start","end"]},
     ]);
   });
   it("expands a single displayed alignment",()=> {
     check(source('- - A\n  - B','{!header align=center}'),[{...table(row(cell("A"),cell("B"))),align:["center","center"]}]);
   });
   it("keeps explicit default alignments",()=> {
-    check(source('- - A\n  - B','{align="-, right"}'),[{...table(row(cell("A"),cell("B"))),align:[null,"right"]}]);
+    check(source('- - A\n  - B','{align="-, end"}'),[{...table(row(cell("A"),cell("B"))),align:[null,"end"]}]);
   });
   it("resolves rectangular merges before transposing",()=> {
     const merged={...cell("Wide"),colSpan:2,rowSpan:2};
@@ -153,7 +153,9 @@ describe("malformed list-table recovery",()=> {
     ['string transpose setting','- - A','{transpose=false}'],
     ['boolean alignment','- - A','{align}'],
     ['unknown alignment','- - A','{align=justify}'],
-    ['wrong alignment width','- - A\n  - B','{align="left,right,center"}'],
+    ['physical left alignment','- - A','{align=left}'],
+    ['physical right alignment','- - A','{align=right}'],
+    ['wrong alignment width','- - A\n  - B','{align="start,end,center"}'],
     ['dangling right merge','- - A\n  - >',''],
     ['first-row vertical merge','- - ^',''],
     ['header-crossing merge','- - Header\n\n- - ^','{header}'],
