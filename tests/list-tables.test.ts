@@ -196,3 +196,15 @@ it("derives named output from edited headers without rematching values",()=> {
   expect(output).toContain('Renamed\\: field:');
   expect(parse(output)).toEqual(document);
 });
+
+it("writes single-line named cells compactly and keeps rich bodies indented",()=> {
+  const document=parse(source('- Name: Ada\n  Status: Ready: yes'));
+  const output=stringify(document);
+  expect(output).toContain('- Name: Ada\n  Status: Ready: yes');
+  expect(parse(output)).toEqual(document);
+  const rich=parse(source('- Notes:\n    First paragraph.\n\n    Second paragraph.'));
+  const richOutput=stringify(rich);
+  expect(richOutput).toMatch(/- Notes:\n    First paragraph\.\n[ \t]*\n    Second paragraph\./);
+  expect(rich.body[0]!.children![1]!.children![0]).toMatchObject({type:"tableCell",body:[{type:"paragraph",value:"First paragraph."},{type:"paragraph",value:"Second paragraph."}]});
+  expect(parse(richOutput)).toEqual(rich);
+});

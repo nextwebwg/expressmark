@@ -51,6 +51,42 @@ it("keeps ordinary headings, lists, code and semantic inline content readable",(
   }
 });
 
+it("writes intraword underscores and email link labels without unnecessary escapes",()=> {
+  for(const source of [
+    "Use snake_case, a_b_c and naïve_identifier.",
+    "[support@example.test](mailto:support@example.test)",
+  ]) {
+    const document=parse(source);
+    expect(stringify(document)).toBe(`${source}\n`);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+it("preserves explicitly plain URL and email text without creating autolinks",()=> {
+  for(const value of ["https://example.test", "HTTP://example.test/path", "ftp://example.test/file", "www.example.test", "support@example.test"]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  for(const source of ["https://example.test", "www.example.test", "support@example.test"]) {
+    const document=parse(source);
+    const output=stringify(document);
+    expect(output).not.toMatch(/\\[:@.]/);
+    expect(parse(output)).toEqual(document);
+  }
+});
+it("preserves ordinary document spacing, nested lists, tables, containers and tabs",()=> {
+  for(const source of [
+    "# Heading\n\nFirst paragraph.\n\nSecond paragraph.",
+    "1. One\n2. Two\n\n- First\n  - Nested\n- Last",
+    "| Name | State |\n| --- | --- |\n| snake_case | Ready: yes |",
+    "::: warning [Before deploying] {#deployment-check}\n\nBack up first: verify backup.\n\n:::",
+    ":::: tabs {group=language}\n::: tab [JavaScript] {value=js}\n```js\nconst ready = true;\n```\n:::\n::: tab [Python] {value=py}\n```py\nready = True\n```\n:::\n::::",
+    "| First line\n| Second line\n|\n\nNext paragraph.",
+  ]) {
+    const document=parse(source);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
 it("preserves marked whitespace and neighboring rich content through Markdown",()=> {
   for(const type of ["strong","emphasis","delete"]) for(const value of ["Hello "," Hello"," ","\tHello\t","\u00a0Hello\u00a0"]) {
     const document={type:"document",version:1,body:[{type:"paragraph",children:[

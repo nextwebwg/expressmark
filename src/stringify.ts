@@ -6,9 +6,15 @@ import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
 import { ConversionError, warn } from "./types.js";
 
 function fail(message: string): never { throw new ConversionError("unsupported-conversion",message); }
-function escapeText(value: string, next?: Node): string {
+function escapeText(value: string, next?: Node, protectAutolinks = true): string {
   return value.replace(/&(?=(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);)/g,"&amp;")
-    .replace(/[\\`*_[\]{}<>~|@]/g,"\\$&")
+    .replace(/[\\`*[\]{}<>~|]/g,"\\$&")
+    .replace(/(?<![\p{L}\p{M}\p{N}])_|_(?![\p{L}\p{M}\p{N}])/gu,"\\$&")
+    .replace(/@/g,(match,index,source)=>!protectAutolinks && /[\p{L}\p{M}\p{N}_\-./@]/u.test(source[index-1] ?? "") ? match:"\\@")
+    // Plain text URLs must remain plain text; explicit link labels cannot
+    // open nested autolinks and can keep their ordinary URL punctuation.
+    .replace(/\b(?:https?|ftp):(?=\/\/)/gi,match=>protectAutolinks ? match.replace(":","\\:"):match)
+    .replace(/\bwww\.(?=[\p{L}\p{N}])/giu,match=>protectAutolinks ? match.replace(".","\\."):match)
     .replace(/(^|\n)([ \t]*)([#>+\-=]|:{2,})/g,"$1$2\\$3")
     // Prose colons are literal. A following link can supply a directive's
     // opening bracket across node boundaries; an inline directive can turn a
@@ -125,9 +131,9 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(Object.hasOwn(metadata,"title") && document.title === undefined) fail("metadata.title has no independent source mapping; use the document title field.");
   }
   diagnoseIds(document,options);
-  function content(node: Node): string {
+  function content(node: Node, protectAutolinks = true): string {
     const children=node.children ?? [];
-    return node.value !== undefined ? escapeText(node.value) : children.map((child,index)=>inline(child,children[index-1],children[index+1])).join("");
+    return node.value !== undefined ? escapeText(node.value,undefined,protectAutolinks) : children.map((child,index)=>inline(child,children[index-1],children[index+1],protectAutolinks)).join("");
   }
   function caption(node: Node): string {
     if(typeof node.title === "object" && node.title !== null && (node.title.id !== undefined || node.title.attributes || ["container","leaf"].includes(node.type) && /[\r\n]|^[ \t]|[ \t]$/.test(content(node.title)))) fail("A title's own attributes have no bracket-title source mapping.");
@@ -178,20 +184,20 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(clean !== raw) warn(options,"presentation-filtered","Native presentation was normalized or filtered by the safe HTML profile.");
     return clean;
   }
-  function inline(node: Node, previous?: Node, next?: Node): string {
+  function inline(node: Node, previous?: Node, next?: Node, protectAutolinks = true): string {
     const attrs=writeAttributes(node);
     if(["link","image"].includes(node.type) && !safeUrl(node.url ?? "",node.type === "image")) {
       warn(options,"unsafe-url","An unsafe link or image URL was removed.");
       return node.type === "image" ? escapeText(node.alt ?? "") : content(node);
     }
-    if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}); return escapeText(node.value ?? "",next); }
+    if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}); return escapeText(node.value ?? "",next,protectAutolinks); }
     if(["strong","emphasis","delete"].includes(node.type)) {
       const marks=["strong","emphasis","delete"];
       // Delimiter runs can lose padded text or merge adjacent/nested marks.
       // Keep their exact boundaries with the existing semantic HTML mapping.
       if(attrs || node.children?.some(child=>marks.includes(child.type))
         || marks.includes(previous?.type ?? "") || marks.includes(next?.type ?? "")) return safeNative(node);
-      const value=content(node);
+      const value=content(node,protectAutolinks);
       if(!value || /^\s|\s$/u.test(value)
         || /^[\p{P}\p{S}]/u.test(value) && previous?.type === "text" && /[^\s\p{P}\p{S}]$/u.test(previous.value ?? "")
         || /[\p{P}\p{S}]$/u.test(value) && next?.type === "text" && /^[^\s\p{P}\p{S}]/u.test(next.value ?? "")) return safeNative(node);
@@ -205,7 +211,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "link" || node.type === "image") {
       const url=(node.url ?? "").replace(/\\/g,"\\\\").replace(/[<>\n]/g,c=>encodeURIComponent(c));
       const tooltip=typeof node.title === "string" ? ` ${quoteAttribute(node.title)}` : "";
-      const label=node.type === "image" ? escapeText(node.alt ?? "") : content(node);
+      const label=node.type === "image" ? escapeText(node.alt ?? "") : content(node,false);
       const destination=/[\s()\\]/u.test(url) ? `<${url}>`:url;
       return `${node.type === "image" ? "!":""}[${label}](${destination}${tooltip})${attrs}`;
     }
@@ -275,8 +281,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       body=sourceGrid.slice(1).map(row=>row.map((cell,index)=> {
         const label=labels[index]!.replace(/[\\:]/g,"\\$&");
         const value=cellSource(cell);
-        // Keep blocks on indented continuation lines, including code and lists.
-        return `${index === 0 ? "- ":"  "}${label}:${value ? `\n${value.split("\n").map(line=>`    ${line}`).join("\n")}`:""}`;
+        // Scalar fields stay on one readable line; block and multiline cells
+        // retain indented continuation bodies, including code and lists.
+        const scalar=!cell.body && value && !value.includes("\n");
+        return `${index === 0 ? "- ":"  "}${label}:${scalar ? ` ${value}`:value ? `\n${value.split("\n").map(line=>`    ${line}`).join("\n")}`:""}`;
       }).join("\n")).join("\n\n");
     } else {
       const seen=new Set<Node>();
