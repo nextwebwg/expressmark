@@ -1,6 +1,43 @@
 import { expect, it } from "vitest";
 import { parse, stringify } from "../src/index.js";
 
+it.each([
+  ':mention[Ada Lovelace]',
+  ':mention[Ada Lovelace]{ref="org/user-123"}',
+  ':mention[Ada]{#acknowledgement}',
+  ':MENTION[Ada]',
+  ':MeNtIoN{ref=ada}',
+])("keeps replaced named mention source literal: %s", source => {
+  const document = parse(source);
+  expect(document.body).toEqual([{type:"paragraph",value:source}]);
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it.each([
+  '@[Ada Lovelace]',
+  '@ada-lovelace',
+  '@[Ada Lovelace]#user-123{#acknowledgement}',
+  '@ada-lovelace#user-123',
+  '@[**Ada Lovelace**]{ref="org/user-123"}',
+])("round-trips the replacement mention source form: %s", source => {
+  const document = parse(source);
+  expect(document.body[0]?.children?.[0]).toMatchObject({type:"inline",subType:"mention"});
+  const output = stringify(document);
+  expect(output).toMatch(/^@\[/);
+  expect(output).not.toContain(":mention");
+  expect(parse(output)).toEqual(document);
+});
+
+it("keeps ordinary formatting and other directives beside the removed mention form", () => {
+  const document = parse('Old :mention[**Ada**], current @[Ada], :chip[Ready] and :mentioning[Topic].');
+  const children = document.body[0]?.children ?? [];
+  expect(children.filter(node => node.type === "inline" && node.subType === "mention")).toHaveLength(1);
+  expect(children).toContainEqual({type:"strong",value:"Ada"});
+  expect(children).toContainEqual({type:"inline",subType:"chip",value:"Ready"});
+  expect(children).toContainEqual({type:"inline",subType:"mentioning",value:"Topic"});
+  expect(parse(stringify(document))).toEqual(document);
+});
+
 it("parses authored identities, metadata, inline structure and mention references", () => {
   const document = parse('---\nid: guide\ntitle: "Deploy **safely**"\ncustom: {enabled: true}\n---\n## Deploy {#deploy}\n\nThanks, @[Ada Lovelace]#user-123{#thanks}.');
   expect(document).toMatchObject({type:"document",version:1,id:"guide",metadata:{custom:{enabled:true}},body:[{type:"heading",level:2,id:"deploy",value:"Deploy"},{type:"paragraph",children:[{type:"text",value:"Thanks, "},{type:"inline",subType:"mention",value:"Ada Lovelace",ref:"user-123",id:"thanks"},{type:"text",value:"."}]}]});

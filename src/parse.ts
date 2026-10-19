@@ -101,6 +101,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     } else {
       const found=tokenIdentifier(state.src.slice(cursor)); if(!found) return false;
       subtype=found.toLowerCase(); cursor+=found.length;
+      // Mentions use @ source syntax; the generic directive form is not an alias.
+      if(subtype === "mention") return false;
       if(state.src[cursor] === "[") {
         const bracket=readLabel(state.src.slice(cursor)); if(!bracket) return false;
         label=bracket.value; cursor+=bracket.length;
