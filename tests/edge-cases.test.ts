@@ -19,6 +19,16 @@ it("keeps directive-shaped literal text and text beside links literal",()=> {
   expect(parse(stringify(document))).toEqual(document);
 });
 
+it("keeps a literal colon before an inline directive from opening a leaf block",()=> {
+  for(const continued of [false,true]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+      ...(continued ? [{type:"text",value:"Text"},{type:"softBreak"}]:[]),
+      {type:"text",value:":"},{type:"inline",subType:"chip",value:"Ready"},
+    ]}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
 it("writes readable destinations and preserves destinations needing delimiters",()=> {
   const readable="[Guide](../guides/start.md#setup) and ![Diagram](./assets/diagram.png).";
   expect(stringify(parse(readable))).toBe(`${readable}\n`);

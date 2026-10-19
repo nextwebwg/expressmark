@@ -11,8 +11,11 @@ function escapeText(value: string, next?: Node): string {
     .replace(/[\\`*_[\]{}<>~|@]/g,"\\$&")
     .replace(/(^|\n)([ \t]*)([#>+\-=]|:{2,})/g,"$1$2\\$3")
     // Prose colons are literal. A following link can supply a directive's
-    // opening bracket across node boundaries, so protect only that junction.
+    // opening bracket across node boundaries; an inline directive can turn a
+    // line-leading literal colon into a leaf marker. Protect those junctions.
     .replace(/:[A-Za-z][A-Za-z0-9_-]*$/g,match=>next?.type === "link" ? `\\${match}`:match)
+    .replace(/(^|\n)([ \t]*):$/g,(match,start,spacing)=>
+      next?.type === "inline" && next.subType !== "mention" ? `${start}${spacing}\\:`:match)
     .replace(/(^|\n)([ \t]*\d{1,9})([.)])(?=[ \t]|$)/g,"$1$2\\$3");
 }
 function inlineCode(value: string): string {
