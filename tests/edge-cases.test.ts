@@ -1,5 +1,101 @@
 import { expect, it } from "vitest";
-import { parse, stringify } from "../src/index.js";
+import { parse, stringify, type Document } from "../src/index.js";
+
+it("writes prose colons without unnecessary escapes in paragraphs and lists",()=> {
+  const source="Status: Open question. Meet at 10:30; https://example.test.\n\n- Coral Island: Underground exploration, ore and gems, and combat.\n\n- Fae Farm: Mine expeditions pair materials with creature encounters.";
+  const document=parse(source);
+  const output=stringify(document);
+  expect(output).not.toContain("\\:");
+  expect(parse(output)).toEqual(document);
+});
+it("keeps directive-shaped literal text and text beside links literal",()=> {
+  for(const value of ["::toc","::: warning",":chip[label]{kind=plain}"]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+    {type:"text",value:"Literal :chip"},{type:"link",value:"docs",url:"https://example.test"},
+  ]}]};
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it("keeps a literal colon before an inline directive from opening a leaf block",()=> {
+  for(const continued of [false,true]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+      ...(continued ? [{type:"text",value:"Text"},{type:"softBreak"}]:[]),
+      {type:"text",value:":"},{type:"inline",subType:"chip",value:"Ready"},
+    ]}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("writes readable destinations and preserves destinations needing delimiters",()=> {
+  const readable="[Guide](../guides/start.md#setup) and ![Diagram](./assets/diagram.png).";
+  expect(stringify(parse(readable))).toBe(`${readable}\n`);
+  for(const source of ['[Guide](<../guides/start (advanced).md>)', '![Diagram](<./assets/diagram(final).png> "Example")']) {
+    const document=parse(source);
+    const output=stringify(document);
+    expect(output).toContain("(<");
+    expect(parse(output)).toEqual(document);
+  }
+});
+it("keeps ordinary headings, lists, code and semantic inline content readable",()=> {
+  for(const source of [
+    "# Setup: Quick start\n\n- Item: description.\n- Next item: more detail.",
+    "Use `const map = {ready: true}`.\n\n```ts\nconst ready: boolean = true;\n```",
+    "Thanks, @[Ada Lovelace]#user-123. :chip[Ready]",
+  ]) {
+    const document=parse(source);
+    expect(stringify(document)).toBe(`${source}\n`);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("writes intraword underscores and email link labels without unnecessary escapes",()=> {
+  for(const source of [
+    "Use snake_case, a_b_c and naïve_identifier.",
+    "[support@example.test](mailto:support@example.test)",
+  ]) {
+    const document=parse(source);
+    expect(stringify(document)).toBe(`${source}\n`);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+it("preserves explicitly plain URL and email text without creating autolinks",()=> {
+  for(const value of ["https://example.test", "HTTP://example.test/path", "ftp://example.test/file", "www.example.test", "support@example.test"]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  for(const source of ["https://example.test", "www.example.test", "support@example.test"]) {
+    const document=parse(source);
+    const output=stringify(document);
+    expect(output).not.toMatch(/\\[:@.]/);
+    expect(parse(output)).toEqual(document);
+  }
+});
+it("preserves literal text split across adjacent nodes without mutating the AST",()=> {
+  for(const values of [["https","://example.test"],["www",".example.test"],[":ch","ip[Ready]"]]) {
+    for(const emptyAttributes of [false,true]) {
+      const document: Document={type:"document",version:1,body:[{type:"paragraph",children:values.map(value=>({type:"text",value,...(emptyAttributes ? {attributes:{}}:{})}))}]};
+      const original=structuredClone(document);
+      expect(parse(stringify(document))).toEqual({type:"document",version:1,body:[{type:"paragraph",value:values.join("")}]});
+      expect(document).toEqual(original);
+    }
+  }
+});
+it("preserves ordinary document spacing, nested lists, tables, containers and tabs",()=> {
+  for(const source of [
+    "# Heading\n\nFirst paragraph.\n\nSecond paragraph.",
+    "1. One\n2. Two\n\n- First\n  - Nested\n- Last",
+    "| Name | State |\n| --- | --- |\n| snake_case | Ready: yes |",
+    "::: warning [Before deploying] {#deployment-check}\n\nBack up first: verify backup.\n\n:::",
+    ":::: tabs {group=language}\n::: tab [JavaScript] {value=js}\n```js\nconst ready = true;\n```\n:::\n::: tab [Python] {value=py}\n```py\nready = True\n```\n:::\n::::",
+    "| First line\n| Second line\n|\n\nNext paragraph.",
+  ]) {
+    const document=parse(source);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
 
 it("preserves marked whitespace and neighboring rich content through Markdown",()=> {
   for(const type of ["strong","emphasis","delete"]) for(const value of ["Hello "," Hello"," ","\tHello\t","\u00a0Hello\u00a0"]) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3
+
+- Keep simple named table cells on the same line as their field names while
+  retaining indented bodies for rich or multiline cells.
+
+- Write ordinary prose colons without backslashes while preserving literal text
+  that could otherwise become directive syntax.
+- Keep intraword underscores and email link labels readable while protecting
+  explicitly plain URL and email text from becoming unintended links.
+- Write simple link and image destinations without unnecessary angle brackets;
+  retain delimiters for destinations that need them.
+
 ## 0.1.2
 
 - Render layout containers with logical alignment and whole-group floating;
