@@ -66,7 +66,7 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   for(const key of ["ordered","tight","checked","header"] as const) if(node[key] !== undefined && typeof node[key] !== "boolean") fail(`${path}.${key} must be a boolean.`);
   for(const key of ["url","alt","language","meta","ref","subType"] as const) if(node[key] !== undefined && typeof node[key] !== "string") fail(`${path}.${key} must be a string.`);
   for(const key of ["level","start","colSpan","rowSpan"] as const) if(node[key] !== undefined && (!Number.isInteger(node[key]) || node[key]! < (key === "start" ? 0:1))) fail(`${path}.${key} has an invalid integer value.`);
-  if(node.align !== undefined && (!Array.isArray(node.align) || node.align.some(value=>value !== null && !["left","center","right"].includes(value)))) fail(`${path}.align needs column alignment values.`);
+  if(node.align !== undefined && (!Array.isArray(node.align) || node.align.some(value=>value !== null && !["start","center","end"].includes(value)))) fail(`${path}.align needs column alignment values.`);
   if(node.type === "group" && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
   const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","align","header","colSpan","rowSpan","display","tag","version","metadata"];
   for(const key of special) if(key in node && !structural[node.type]?.includes(key)) fail(`${path}.${key} is not defined for ${node.type}.`);

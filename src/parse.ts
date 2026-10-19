@@ -387,9 +387,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
             cursor++; rows.push(row); rawCells.push(sources);
           }
           cursor++;
+          // markdown-it reports physical CSS values for GFM markers; the public AST uses logical directions.
           const alignment=rows[0]?.children?.map((_cell,index)=> {
             const first=tokens.slice(start,cursor).filter(t=>t.type === "th_open")[index];
-            const style=String(first?.attrGet("style") ?? ""); return style?.includes("center") ? "center" : style?.includes("right") ? "right" : style?.includes("left") ? "left" : null;
+            const style=String(first?.attrGet("style") ?? ""); return style?.includes("center") ? "center" : style?.includes("right") ? "end" : style?.includes("left") ? "start" : null;
           }) ?? [];
           const table: Node={type:"table",children:rows};
           if(alignment.some(Boolean)) table.align=alignment;

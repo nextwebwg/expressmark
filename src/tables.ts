@@ -140,10 +140,10 @@ export function readListTable(container: Node, source: string, md: MarkdownIt, p
     if(attributes.align !== undefined) {
       if(typeof attributes.align !== "string") invalid("Table alignment must be a comma-separated string.");
       const align=attributes.align.split(",").map(value=>value.trim());
-      if(align.some(value=>!["left","center","right","-"].includes(value))) invalid("Unknown table alignment.");
+      if(align.some(value=>!["start","center","end","-"].includes(value))) invalid("Unknown table alignment.");
       const displayedWidth=attributes.transpose === true ? rows.length:width;
       if(align.length !== 1 && (!displayedWidth || align.length !== displayedWidth)) invalid("Alignment count must match the displayed width.");
-      result.align=Array.from({length:displayedWidth},(_,index)=>align[align.length === 1 ? 0:index] === "-" ? null:align[align.length === 1 ? 0:index] as "left"|"center"|"right");
+      result.align=Array.from({length:displayedWidth},(_,index)=>align[align.length === 1 ? 0:index] === "-" ? null:align[align.length === 1 ? 0:index] as "start"|"center"|"end");
     }
     delete attributes.header; delete attributes.transpose; delete attributes.align;
     if(Object.keys(attributes).length) result.attributes=attributes;

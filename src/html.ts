@@ -184,7 +184,7 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
       const node: Node = {type:"table",children:children.filter(n=>n.type === "tableRow")};
       const caption=children.find(n=>n.type === "title"); if(caption) node.title=caption;
       if(typeof attributes.dataAlign === "string") {
-        try { const align: unknown=JSON.parse(attributes.dataAlign); if(Array.isArray(align) && align.every(value=>value === null || ["left","center","right"].includes(value))) {node.align=align;delete attributes.dataAlign;} } catch { /* Preserve invalid authored data as an ordinary attribute. */ }
+        try { const align: unknown=JSON.parse(attributes.dataAlign); if(Array.isArray(align) && align.every(value=>value === null || ["start","center","end"].includes(value))) {node.align=align;delete attributes.dataAlign;} } catch { /* Preserve invalid authored data as an ordinary attribute. */ }
       }
       return finish(node);
     }
