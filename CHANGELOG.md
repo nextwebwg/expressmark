@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.6
+
+- Keep ordinary punctuation readable during Markdown export, including bracketed
+  ranges, braces, comparisons, pipes, unmatched delimiters and `a@word`. Protect
+  literal syntax according to its block, inline and adjacent-node context.
+- Require whitespace or the start of inline source before a mention. Preserve
+  authored mention nodes at other boundaries through semantic HTML.
+- Keep unmatched backticks literal in directive labels, respect code-span
+  delimiters, and use the correct punctuation context for YAML document titles.
+- Preserve literal backslashes when they could expose syntax or consume generated
+  formatting and label delimiters.
+
 ## 0.1.5
 
 - Use logical `start`, `center` and `end` table alignment in source settings,
