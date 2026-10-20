@@ -13,6 +13,9 @@ export function tokenHandle(source: string): string | undefined {
   const result = run(handle, source);
   return result.ok ? result.value : undefined;
 }
+export function mentionBoundary(source: string, offset: number): boolean {
+  return offset === 0 || /\s/u.test(source[offset-1]!);
+}
 export function attributeKey(key: string): string {
   return key.toLowerCase().split("-").filter(Boolean).map((part, i) => i ? part.replace(/^[a-z]/, c => c.toUpperCase()) : part).join("");
 }
@@ -62,12 +65,19 @@ export function readLabel(source: string): { value: string; length: number } | u
   if (source[0] !== "[") return;
   let depth = 1;
   let code = "";
+  // An unmatched backtick run is text. Only matched code delimiters shield
+  // brackets, and backslashes inside code do not escape those delimiters.
+  let lastTick: Map<number,number> | undefined;
   for (let i = 1; i < source.length; i++) {
     const c = source[i];
-    if (c === "\\") { i++; continue; }
+    if (c === "\\" && !code) { i++; continue; }
     if (c === "`") {
+      if(!lastTick) {
+        lastTick=new Map();
+        for(const match of source.matchAll(/`+/g)) lastTick.set(match[0].length,match.index);
+      }
       const marks = /^`+/.exec(source.slice(i))![0];
-      if (!code) code = marks; else if (code === marks) code = "";
+      if (!code && lastTick.get(marks.length)!>i) code = marks; else if (code === marks) code = "";
       i += marks.length - 1;
       continue;
     }
