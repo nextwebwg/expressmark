@@ -129,7 +129,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   }
   function caption(node: Node): string {
     if(typeof node.title === "object" && node.title !== null && (node.title.id !== undefined || node.title.attributes || ["container","leaf"].includes(node.type) && /[\r\n]|^[ \t]|[ \t]$/.test(content(node.title)))) fail("A title's own attributes have no bracket-title source mapping.");
-    return typeof node.title === "object" && node.title !== null ? content(node.title,{label:true}) : typeof node.title === "string" ? escapeText(node.title,{block:false,label:true}) : ""; }
+    const context: TextContext={block:false,label:node.type !== "document"};
+    return typeof node.title === "object" && node.title !== null ? content(node.title,context) : typeof node.title === "string" ? escapeText(node.title,context) : ""; }
   function native(node: Node): string {
     const wrapper=(tag:string,value:string,extra:Record<string,string|boolean|number> = {}) => `<${tag}${attrsHtml(node,extra)}>${value}</${tag}>`;
     const kids=()=>node.value !== undefined ? escapeHtml(node.value) : (node.children ?? []).map(native).join("");

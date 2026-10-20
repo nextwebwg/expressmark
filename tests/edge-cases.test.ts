@@ -31,6 +31,21 @@ it("uses the enclosing block context for literal punctuation",()=> {
   expect(stringify(parse(source))).toBe(`${source}\n`);
 });
 
+it("keeps unmatched backticks literal inside directive labels and titles",()=> {
+  for(const source of [":chip[Use ` literally]", "::: note [Use ` literally]\nBody.\n:::"]) {
+    const document=parse(source);
+    expect(JSON.stringify(document)).toContain('"subType":');
+    expect(stringify(document)).toBe(`${source}\n`);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  const document: Document={type:"document",version:1,title:{type:"title",value:"Unmatched [ range"},body:[]};
+  expect(stringify(document)).not.toContain("\\[");
+  expect(parse(stringify(document))).toEqual(document);
+  const code=parse(":chip[`a\\`]");
+  expect(code.body[0]?.children?.[0]?.children).toEqual([{type:"inlineCode",value:"a\\"}]);
+  expect(parse(stringify(code))).toEqual(code);
+});
+
 it("keeps syntax-shaped literal text literal in its full writing context",()=> {
   for(const value of [
     "*literal* and a * b", "_literal_ and underscore_", "~~literal~~ and ~5",
