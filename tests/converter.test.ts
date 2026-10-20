@@ -1,6 +1,16 @@
 import { expect, it } from "vitest";
 import { parse, stringify } from "../src/index.js";
 
+it.each(["a@word", "a@[Ada]", "(@word)", "!@[Ada]", "日@word", "/@word"])("requires whitespace or a line start before mentions: %s", source => {
+  expect(parse(source).body).toEqual([{type:"paragraph",value:source}]);
+  expect(stringify(parse(source))).toBe(`${source}\n`);
+});
+
+it.each(["@ada", "Hello @ada", "Hello\n@ada", "Hello\t@[Ada]", "Hello\u00a0@ada"])("recognizes mentions at a whitespace boundary: %s", source => {
+  expect(JSON.stringify(parse(source))).toContain('"subType":"mention"');
+  expect(parse(stringify(parse(source)))).toEqual(parse(source));
+});
+
 it.each([
   ':mention[Ada Lovelace]',
   ':mention[Ada Lovelace]{ref="org/user-123"}',

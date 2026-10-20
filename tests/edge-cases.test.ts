@@ -1,6 +1,84 @@
 import { expect, it } from "vitest";
 import { parse, stringify, type Document } from "../src/index.js";
 
+it.each([
+  "The range is [-1, 1], with an unmatched [ or ].",
+  "Set {name}; x < 5, x > 2; a | b; ~5; a * b.",
+  "An unmatched ` backtick and trailing underscore_.",
+  "An @ sign, a@word, a@[label], (@word) and /@word.",
+  "#hashtag, +5, -5 and =value are ordinary text.",
+  "A \\q path and &unknownentity; stay literal.",
+  "Status: ready. Meet at 10:30; use snake_case.",
+  "+5 is positive.", "-5 is negative.", "=value is an assignment.", "=", "===", "--",
+  "[x] is ordinary paragraph text.",
+])("writes literal prose without redundant punctuation escapes: %s", value => {
+  const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+  expect(parse(value)).toEqual(document);
+  expect(stringify(document)).toBe(`${value}\n`);
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it("uses the enclosing block context for literal punctuation",()=> {
+  for(const value of ["1. item", "- item", "# heading", "| line"]) {
+    const heading: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
+    expect(stringify(heading)).toBe(`## ${value}\n`);
+    expect(parse(stringify(heading))).toEqual(heading);
+    const line: Document={type:"document",version:1,body:[{type:"lineBlock",value}]};
+    expect(stringify(line)).toBe(`| ${value}\n`);
+    expect(parse(stringify(line))).toEqual(line);
+  }
+  const source="- Clamp to [-1, 1]; use {name}, a@word and a | b.";
+  expect(stringify(parse(source))).toBe(`${source}\n`);
+});
+
+it("keeps syntax-shaped literal text literal in its full writing context",()=> {
+  for(const value of [
+    "*literal* and a * b", "_literal_ and underscore_", "~~literal~~ and ~5",
+    "`literal` and an unmatched ``", "[label](target)", "[[label](target)", "![alt](image.png)",
+    "<b>literal</b> and x < 5", "<https://example.test>", "&copy; and &#65;",
+    ":chip[Ready]{tone=green}", "@[Ada] and @ada", "# heading", "+ item", "- item",
+    "1. item", "2) item", "---", "a\n===", "| line", "::toc", "::: note", "a | b\n:-- | --:",
+  ]) {
+    const paragraph=value.includes("\n") ? {type:"paragraph",children:value.split("\n").flatMap((line,index)=>[
+      ...(index ? [{type:"softBreak"}]:[]),{type:"text",value:line},
+    ])}:{type:"paragraph",value};
+    const document: Document={type:"document",version:1,body:[paragraph]};
+    expect(parse(stringify(document)),value).toEqual(document);
+  }
+  for(const checked of ["x", " "]) {
+    const document: Document={type:"document",version:1,body:[{type:"list",ordered:false,tight:true,children:[
+      {type:"listItem",body:[{type:"paragraph",value:`[${checked}] literal task marker`}]},
+    ]}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("preserves punctuation where inline nodes meet or nest",()=> {
+  const mention={type:"inline",subType:"mention",value:"Ada"};
+  const nodes=[
+    [{type:"text",value:"@"},{type:"link",value:"label",url:"target"}],
+    [{type:"text",value:"["},{type:"strong",value:"label"},{type:"text",value:"](target)"}],
+    [{type:"link",value:"label",url:"target"},{type:"text",value:"{name}"}],
+    [{type:"text",value:"("},mention,{type:"text",value:")"}],
+    [{type:"strong",children:[mention]}],
+    [{type:"link",children:[mention],url:"target"}],
+    [{type:"text",value:"~"},{type:"delete",value:"word"}],
+    [{type:"strong",value:"*"}],
+    [{type:"delete",value:"~"}],
+  ];
+  for(const children of nodes) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",children}]};
+    expect(parse(stringify(document)),JSON.stringify(children)).toEqual(document);
+  }
+  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"a * b and @word"}]}]})).toBe("**a * b and \\@word**\n");
+  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"@word"}]}]})).toBe("**@word**\n");
+  expect(stringify({type:"document",version:1,body:[{type:"heading",level:2,value:"Set {name} today"}]})).toBe("## Set {name} today\n");
+  for(const value of ["Title {name}","Title #"]) {
+    const document: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
 it("writes prose colons without unnecessary escapes in paragraphs and lists",()=> {
   const source="Status: Open question. Meet at 10:30; https://example.test.\n\n- Coral Island: Underground exploration, ore and gems, and combat.\n\n- Fae Farm: Mine expeditions pair materials with creature encounters.";
   const document=parse(source);

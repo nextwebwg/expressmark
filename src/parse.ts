@@ -1,6 +1,7 @@
 import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markdown-it";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
-import { attach, compact, diagnoseIds, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { configureAutolinks } from "./autolinks.js";
+import { attach, compact, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import type { ConversionOptions, Document, Json, Node } from "./types.js";
@@ -35,15 +36,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
-  // GFM recognizes www-prefixed links, while linkify-it leaves fuzzy URLs off.
-  // Reuse its HTTP boundary rules without also linking arbitrary bare domains.
-  md.linkify.add("www.", {
-    validate(text,position,self) {
-      const length=self.testSchemaAt(`//www.${text.slice(position)}`,"http:",0);
-      return length>6 ? length-6:0;
-    },
-    normalize(match) { match.url=`http://${match.raw}`; },
-  });
+  configureAutolinks(md);
   const env: Record<string,unknown> = {};
   const tasks=new WeakMap<Node,RegExpExecArray>();
   let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
@@ -86,7 +79,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     let label: string | undefined;
     let ref: string | undefined;
     if(marker === "@") {
-      if (/[\p{L}\p{M}\p{N}_\-./@]/u.test(state.src[start-1] ?? "")) return false;
+      if (!mentionBoundary(state.src,start)) return false;
       subtype="mention";
       if(state.src[cursor] === "[") {
         const found=readLabel(state.src.slice(cursor)); if(!found) return false;

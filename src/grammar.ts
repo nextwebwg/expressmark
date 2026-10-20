@@ -13,6 +13,9 @@ export function tokenHandle(source: string): string | undefined {
   const result = run(handle, source);
   return result.ok ? result.value : undefined;
 }
+export function mentionBoundary(source: string, offset: number): boolean {
+  return offset === 0 || /\s/u.test(source[offset-1]!);
+}
 export function attributeKey(key: string): string {
   return key.toLowerCase().split("-").filter(Boolean).map((part, i) => i ? part.replace(/^[a-z]/, c => c.toUpperCase()) : part).join("");
 }
