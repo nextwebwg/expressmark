@@ -51,7 +51,8 @@ it("keeps syntax-shaped literal text literal in its full writing context",()=> {
     "*literal* and a * b", "_literal_ and underscore_", "~~literal~~ and ~5",
     "`literal` and an unmatched ``", "[label](target)", "[[label](target)", "![alt](image.png)",
     "<b>literal</b> and x < 5", "<https://example.test>", "&copy; and &#65;",
-    ":chip[Ready]{tone=green}", "@[Ada] and @ada", "# heading", "+ item", "- item",
+    ":chip[Ready]{tone=green}", ":chip[a\\]", "@[a\\]", ':chip{a="x\\"}',
+    "@[Ada] and @ada", "# heading", "+ item", "- item",
     "1. item", "2) item", "---", "a\n===", "| line", "::toc", "::: note", "a | b\n:-- | --:",
   ]) {
     const paragraph=value.includes("\n") ? {type:"paragraph",children:value.split("\n").flatMap((line,index)=>[
@@ -88,9 +89,21 @@ it("preserves punctuation where inline nodes meet or nest",()=> {
   expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"a * b and @word"}]}]})).toBe("**a * b and \\@word**\n");
   expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"@word"}]}]})).toBe("**@word**\n");
   expect(stringify({type:"document",version:1,body:[{type:"heading",level:2,value:"Set {name} today"}]})).toBe("## Set {name} today\n");
-  for(const value of ["Title {name}","Title #"]) {
+  for(const value of ["Title {name}","Title #",'Title {a="x\\"}']) {
     const document: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
     expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("preserves literal punctuation across enclosing inline and block contexts",()=> {
+  for(const value of ["[", "]", "[x]", "\\", "`", "``", "*", "**", "_", "~", "~~", "@word", ":chip[a\\]", '{a="x\\"}', "x < 5", "a | b"]) {
+    for(const type of ["paragraph", "heading", "lineBlock", "strong", "emphasis", "delete", "link", "inline"]) {
+      const node={type,value,...(type === "heading" ? {level:2}:{}),...(type === "link" ? {url:"target"}:{}),...(type === "inline" ? {subType:"chip"}:{})};
+      const document: Document={type:"document",version:1,body:[
+        ["paragraph","heading","lineBlock"].includes(type) ? node:{type:"paragraph",children:[node]},
+      ]};
+      expect(parse(stringify(document)),`${type}: ${JSON.stringify(value)}`).toEqual(document);
+    }
   }
 });
 

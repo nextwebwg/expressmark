@@ -22,13 +22,20 @@ export function startsMention(context: TextContext): boolean {
 }
 
 function trailingAttributes(value: string): boolean {
-  let rest=value;
+  let rest=literalGrammarSource(value);
   while(rest) {
     const attrs=readAttributes(rest);
     if(!attrs) return false;
     rest=rest.slice(attrs.length).trimStart();
   }
   return true;
+}
+
+// Stored backslashes are data, not authored escapes. Grammar lookahead must
+// see their protected spelling; otherwise doubling a backslash can expose a
+// closing bracket/quote and create syntax that was invisible in the raw value.
+function literalGrammarSource(value: string): string {
+  return value.replace(/[\\`]/g,"\\$&");
 }
 
 // Balance literal delimiter runs with the same flanking and pairing rules as
@@ -87,7 +94,7 @@ export function escapeText(value: string, context: TextContext = {}): string {
   const inlineState=new syntax.inline.State(value,syntax,{},[]);
   for(let i=0;i<value.length;i++) {
     const char=value[i]!;
-    if(char === "\\" && (/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~\n]/.test(value[i+1] ?? "") || i === value.length-1 && context.next)) escapes.add(i);
+    if(char === "\\" && (/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~\n]/.test(value[i+1] ?? "") || i === value.length-1 && (context.next || context.label || context.marks))) escapes.add(i);
     if(char === "[" || char === "<") {
       if(opensInlineSyntax(inlineState,i)) {
         escapes.add(i);
@@ -99,19 +106,19 @@ export function escapeText(value: string, context: TextContext = {}): string {
     if(char === "[") brackets.push(i);
     if(char === "]" && brackets.pop() === undefined && (context.label || mixed)) escapes.add(i);
     if(char === "@" && mentionBoundary(value,i) && (i>0 || startsMention(context))) {
-      if(readLabel(value.slice(i+1)) || tokenHandle(value.slice(i+1)) || i === value.length-1 && context.next?.type === "link") escapes.add(i);
+      if(readLabel(literalGrammarSource(value.slice(i+1))) || tokenHandle(value.slice(i+1)) || i === value.length-1 && context.next?.type === "link") escapes.add(i);
     }
     if(char === ":") {
       if(context.block !== false && /(?:^|\n)[ \t]*:$/.test(value.slice(0,i+1)) && context.next?.type === "inline" && context.next.subType !== "mention") escapes.add(i);
       const name=tokenIdentifier(value.slice(i+1));
       if(name && name.toLowerCase() !== "mention") {
-        const tail=value.slice(i+1+name.length);
+        const tail=literalGrammarSource(value.slice(i+1+name.length));
         if(readLabel(tail) || readAttributes(tail) || !tail && context.next?.type === "link") escapes.add(i);
       }
     }
     if(char === "{" && (i === 0 && ["link","image","inline"].includes(context.previous?.type ?? "") || context.heading && !context.next && /\s/u.test(value[i-1] ?? ""))) {
       const rest=value.slice(i);
-      if(i === 0 && context.previous ? readAttributes(rest):trailingAttributes(rest)) escapes.add(i);
+      if(i === 0 && context.previous ? readAttributes(literalGrammarSource(rest)):trailingAttributes(rest)) escapes.add(i);
     }
   }
   if(context.label || mixed) for(const index of brackets) escapes.add(index);
