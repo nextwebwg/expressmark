@@ -1,6 +1,6 @@
 {
   "name": "expressmark",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Parse and write Expressive Markdown with its document AST.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,7 @@
 import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markdown-it";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
+import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { attach, compact, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
@@ -37,6 +38,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
   configureAutolinks(md);
+  // Definition labels, collected by the block pass before any inline content is read.
+  const footnotes=new Set<string>();
+  const defined=new Set<string>();
   const env: Record<string,unknown> = {};
   const tasks=new WeakMap<Node,RegExpExecArray>();
   let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
@@ -127,6 +131,90 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.pos+=attrs.length;
     return true;
   });
+  md.block.ruler.before("reference","footnote_definition",(state,start,end,silent) => {
+    if(state.sCount[start]! - state.blkIndent >= 4) return false;
+    const begin=state.bMarks[start]!+state.tShift[start]!;
+    const match=/^\[\^([^\]]*)\]:/.exec(state.src.slice(begin,state.eMarks[start]));
+    if(!match || tokenHandle(match[1]!) !== match[1]) return false;
+    if(silent) return true;
+    footnotes.add(match[1]!);
+    state.push("footnote_open","",1).meta={label:match[1]};
+    // Read the note like a list item: its first line starts after the marker,
+    // and its continuation lines are indented four columns past the marker.
+    const saved={bMark:state.bMarks[start]!,tShift:state.tShift[start]!,sCount:state.sCount[start]!,parentType:state.parentType};
+    let position=begin+match[0].length;
+    const contentStart=position;
+    let offset=state.sCount[start]!+match[0].length;
+    const initial=offset;
+    while(position<state.eMarks[start]! && (state.src[position] === " " || state.src[position] === "\t")) {
+      offset+=state.src[position] === "\t" ? 4-((offset+state.bsCount[start]!)%4):1;
+      position++;
+    }
+    state.tShift[start]=position-contentStart;
+    state.sCount[start]=offset-initial;
+    state.bMarks[start]=contentStart;
+    state.blkIndent+=4;
+    state.parentType="footnote" as typeof state.parentType;
+    if(state.sCount[start]! < state.blkIndent) state.sCount[start]!+=state.blkIndent;
+    state.md.block.tokenize(state,start,end);
+    state.parentType=saved.parentType;
+    state.blkIndent-=4;
+    state.tShift[start]=saved.tShift; state.sCount[start]=saved.sCount; state.bMarks[start]=saved.bMark;
+    state.push("footnote_close","",-1);
+    return true;
+  },{alt:["paragraph","reference"]});
+  // Reference definitions and reference links keep their authored form. Wrap
+  // markdown-it's own rules so CommonMark decides what matches; then record it.
+  type Rule<T> = {__rules__:{name:string;fn:T}[]};
+  const original=<T,>(ruler: unknown, name: string)=>(ruler as Rule<T>).__rules__.find(rule=>rule.name === name)!.fn;
+  const referenceRule=original<(state: StateBlock,start: number,end: number,silent: boolean)=>boolean>(md.block.ruler,"reference");
+  md.block.ruler.at("reference",(state,start,end,silent) => {
+    const env=state.env as {references?: Record<string,{href:string;title:string}>};
+    const outer=env.references ?? {};
+    // A fresh table reveals this definition's values even when an earlier one
+    // already owns the label; the first definition still wins for resolution.
+    const own: NonNullable<typeof env.references>={};
+    env.references=own;
+    let matched: boolean;
+    try { matched=referenceRule(state,start,end,silent); } finally { env.references=outer; }
+    if(!matched || silent) return matched;
+    const [key,value]=Object.entries(own)[0]!;
+    if(!(key in outer)) outer[key]=value;
+    // markdown-it's own token keeps only the normalized label; record the authored one.
+    const raw=/^\[((?:\\[\s\S]|[^\\[\]])*)\]:/.exec(state.getLines(start,state.line,state.blkIndent,false).trimStart())!;
+    state.tokens.at(-1)!.meta={label:raw[1],url:value.href,title:value.title};
+    return true;
+  });
+  md.core.ruler.disable("strip_references");
+  for(const [name,offset] of [["link",0],["image",1]] as const) {
+    const rule=original<(state: StateInline,silent: boolean)=>boolean>(md.inline.ruler,name);
+    md.inline.ruler.at(name,(state,silent) => {
+      const start=state.pos;
+      const count=state.tokens.length;
+      if(!rule(state,silent)) return false;
+      if(silent) return true;
+      const labelEnd=state.md.helpers.parseLinkLabel(state,start+offset,name === "link");
+      const text=state.src.slice(start+offset+1,labelEnd);
+      const rest=state.src.slice(labelEnd+1,state.pos);
+      if(!rest.startsWith("(")) {
+        const full=/^\[([\s\S]+)\]$/.exec(rest);
+        // Pending text is flushed first, so find the token this rule opened.
+        const token=state.tokens.slice(count).find(candidate=>candidate.type === (name === "link" ? "link_open":"image"))!;
+        token.meta={...token.meta,reference:{label:full ? full[1]:text,referenceType:full ? "full":rest ? "collapsed":"shortcut"}};
+      }
+      return true;
+    });
+  }
+  md.inline.ruler.before("link","footnote_reference",(state: StateInline,silent: boolean) => {
+    if(state.src[state.pos] !== "[" || state.src[state.pos+1] !== "^") return false;
+    const label=tokenHandle(state.src.slice(state.pos+2));
+    if(!label || state.src[state.pos+2+label.length] !== "]") return false;
+    // An undefined reference stays text, as an unresolved link reference does.
+    if(!footnotes.has(label)) { if(!silent) warn(options,"undefined-footnote",`Footnote [^${label}] has no definition; it remains text.`); return false; }
+    if(!silent) { const token=state.push("footnote_ref","",0); token.meta={label}; token.content=`[^${label}]`; }
+    state.pos+=label.length+3;
+    return true;
+  });
   md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
@@ -163,7 +251,6 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       warn(options,"unclosed-container","An unclosed or mismatched container is preserved as literal source.");
       state.line=end; return true;
     }
-    title(node);
     if(node.subType === "table") {
       const body=state.getLines(start+1,close,state.blkIndent,false);
       state.push("expressive_table","",0).meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()};
@@ -182,7 +269,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const match=/^::(?!:)(.*)$/.exec(line(state,start)); if(!match) return false;
     const node=readHeader(match[1]!,options); if(!node) return false;
     if(silent) return true;
-    node.type="leaf"; delete node.body; title(node);
+    node.type="leaf"; delete node.body;
     state.push("expressive_leaf","",0).meta={node};
     state.line=start+1; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
@@ -220,16 +307,21 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         if(token.type === until) break;
         if(token.type === "text") nodes.push({type:"text",value:token.content});
         else if(token.type === "expressive_inline") nodes.push(token.meta!.node as Node);
+        else if(token.type === "footnote_ref") nodes.push({type:"footnoteReference",label:token.meta!.label as string});
         else if(token.type === "softbreak" || token.type === "hardbreak") nodes.push({type:token.type === "hardbreak" || lineBlock ? "break":"softBreak"});
         else if(token.type === "code_inline") nodes.push({type:"inlineCode",value:token.content});
         else if(token.type === "image") {
-          const node: Node={type:"image",url:String(token.attrGet("src") ?? ""),alt:token.children ? token.children.map(t=>t.content).join("") : token.content};
-          const tooltip=token.attrGet("title"); if(tooltip !== null) node.title=String(tooltip);
+          const alt=token.children ? token.children.map(t=>t.content).join("") : token.content;
+          const reference=token.meta?.reference as Pick<Node,"label"|"referenceType"> | undefined;
+          // A reference keeps its label; the definition supplies the target when rendering.
+          const node: Node=reference ? {type:"imageReference",...reference,alt} : {type:"image",url:String(token.attrGet("src") ?? ""),alt};
+          const tooltip=token.attrGet("title"); if(tooltip !== null && !reference) node.title=String(tooltip);
           for(const attrs of ((token.meta?.attributes ?? []) as NonNullable<ReturnType<typeof readAttributes>>[])) attach(node,attrs);
           nodes.push(node);
         } else if(token.type === "link_open") {
-          const node=compact({type:"link",url:String(token.attrGet("href") ?? "")},read("link_close"));
-          const tooltip=token.attrGet("title"); if(tooltip !== null) node.title=String(tooltip);
+          const reference=token.meta?.reference as Pick<Node,"label"|"referenceType"> | undefined;
+          const node=compact(reference ? {type:"linkReference",...reference} : {type:"link",url:String(token.attrGet("href") ?? "")},read("link_close"));
+          const tooltip=token.attrGet("title"); if(tooltip !== null && !reference) node.title=String(tooltip);
           for(const attrs of ((tokens[cursor-1]?.meta?.attributes ?? []) as NonNullable<ReturnType<typeof readAttributes>>[])) attach(node,attrs);
           nodes.push(node);
         } else if(["em_open","strong_open","s_open"].includes(token.type)) {
@@ -348,17 +440,30 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         } else if(token.type === "hr") nodes.push({type:"horizontalRule"});
         else if(token.type === "html_block") nodes.push(...htmlNodes(token.content.trimEnd(),"block",options));
         else if(token.type === "expressive_container_open") {
-          const node=token.meta!.node as Node; node.body=read("expressive_container_close"); nodes.push(node);
+          // Titles are read after the block pass so they can refer to any footnote.
+          const node=token.meta!.node as Node; title(node); node.body=read("expressive_container_close"); nodes.push(node);
         } else if(token.type === "expressive_table") {
           // Convert after the document block pass has collected link references.
           const meta=token.meta as {node:Node;body:string;source:string};
+          title(meta.node);
           const table=readListTable(meta.node,meta.body,md,value=>blocks(md.parse(value,env),value));
           if(typeof table === "string") {
             nodes.push({type:"literal",display:"block",value:sanitizeLiteral(meta.source,options)});
             warn(options,"invalid-table",table);
           } else nodes.push(table);
         }
-        else if(token.type === "expressive_leaf") nodes.push(token.meta!.node as Node);
+        else if(token.type === "expressive_leaf") { const node=token.meta!.node as Node; title(node); nodes.push(node); }
+        else if(token.type === "reference_definition") {
+          const meta=token.meta as {label:string;url:string;title:string};
+          nodes.push({type:"definition",label:meta.label,url:meta.url,...(meta.title ? {title:meta.title}:{})});
+        }
+        else if(token.type === "footnote_open") {
+          // Definitions stay where they were written; the renderer collects them.
+          const label=token.meta!.label as string;
+          if(defined.has(label)) warn(options,"duplicate-footnote",`Footnote [^${label}] is defined more than once; the first definition is the note.`);
+          defined.add(label);
+          nodes.push({type:"footnoteDefinition",label,body:read("footnote_close")});
+        }
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
         else if(token.type === "expressive_line_block") nodes.push(compact({type:"lineBlock"},inline(token.content,true)));
         else if(token.type === "table_open") {
@@ -402,6 +507,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     return read();
   }
+  let documentTitle: string | undefined;
   const front=/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(source);
   if(front) {
     const value=front[1]!;
@@ -441,13 +547,19 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(map.description !== undefined && typeof map.description !== "string") throw new Error("Frontmatter description must be a string.");
       if(map.tags !== undefined && (!Array.isArray(map.tags) || !map.tags.every(tag=>typeof tag === "string"))) throw new Error("Frontmatter tags must be a string list.");
       if(typeof map.id === "string") { document.id=map.id; delete map.id; }
-      if(typeof map.title === "string") { document.title=compact({type:"title"},inline(map.title)); delete map.title; }
+      if(typeof map.title === "string") { documentTitle=map.title; delete map.title; }
       if(Object.keys(map).length) document.metadata=map;
     } catch(error) { valid=false; warn(options,"invalid-frontmatter",error instanceof Error ? error.message : "Unsupported YAML frontmatter."); }
     if(!valid) recoveredFrontmatter={type:"literal",display:"block",value:sanitizeHtml(front[0].trimEnd(),options)};
     source=source.slice(front[0].length);
   }
   document.body=normalizeTabs(blocks(md.parse(source,env),source));
+  if(documentTitle !== undefined) document.title=compact({type:"title"},inline(documentTitle));
+  const notes=footnoteDefinitions(document);
+  if(notes.size) {
+    const used=new Set(referenceOrder(document,notes));
+    for(const label of notes.keys()) if(!used.has(label)) warn(options,"unused-footnote",`Footnote [^${label}] is never referenced.`);
+  }
   if(recoveredFrontmatter) document.body.unshift(recoveredFrontmatter);
   clearAutomatic(document);
   diagnoseIds(document,options);

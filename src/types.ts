@@ -27,6 +27,8 @@ export interface Node {
   language?: string;
   meta?: string;
   ref?: string;
+  label?: string;
+  referenceType?: "full" | "collapsed" | "shortcut";
   align?: ("start" | "center" | "end" | null)[];
   header?: boolean;
   colSpan?: number;

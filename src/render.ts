@@ -1,4 +1,6 @@
 import { escapeHtml, sanitizeHtml } from "./html.js";
+import { footnoteDefinitions, linkDefinitions, references, referenceOrder } from "./references.js";
+import { normalizeLabel } from "./grammar.js";
 import { sourceKey } from "./grammar.js";
 import { ConversionError, warn, type ConversionOptions, type Document, type Node } from "./types.js";
 
@@ -34,8 +36,20 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   const active = new Set<Node>();
   const transformers = options.transformers ?? {};
   let inheritedAlignment: LayoutAlignment | undefined;
+  // Definitions render once, collected at the end and numbered by first
+  // reference; each note counts its references for back-links.
+  const notes = footnoteDefinitions(document);
+  const rendered = referenceOrder(document, notes);
+  const numbers = new Map(rendered.map((label, index) => [label, index + 1]));
+  const counts = new Map<string, number>();
+  const count = (label: string) => { if (notes.has(label)) counts.set(label, (counts.get(label) ?? 0) + 1); };
+  references(document, count);
+  for (const label of rendered) for (const child of notes.get(label)!.body ?? []) references(child, count);
+  const occurrences = new Map<string, number>();
+  // Reference links resolve here, against the first definition of each label.
+  const definitions = linkDefinitions(document);
   function content(node: Node): string {
-    return node.value != null ? escapeHtml(node.value) : (node.body ?? node.children ?? []).map(render).join("");
+    return node.value != null ? escapeHtml(node.value) : (node.body ?? node.children ?? []).filter(child => child?.type !== "footnoteDefinition").map(render).join("");
   }
   function title(node: Node): string {
     return typeof node.title === "string" ? escapeHtml(node.title) : node.title ? render(node.title) : "";
@@ -92,7 +106,39 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   }
   function defaultRender(node: Node): string {
     switch (node.type) {
-      case "document": return `${node.title ? `<h1>${title(node)}</h1>` : ""}${content(node)}`;
+      case "document": {
+        const value = `${node.title ? `<h1>${title(node)}</h1>` : ""}${content(node)}`;
+        const items = rendered.map(label => render(notes.get(label)!)).join("");
+        return items ? `${value}<section data-footnotes aria-label="Footnotes"><ol>${items}</ol></section>` : value;
+      }
+      case "definition": return "";
+      case "linkReference": case "imageReference": {
+        const definition = definitions.get(normalizeLabel(node.label ?? ""));
+        const link = { href: definition?.url ?? "", ...(typeof definition?.title === "string" ? { title: definition.title } : {}) };
+        if (definition && node.type === "linkReference") return element(node, "a", content(node), link);
+        if (definition) return `<img${attributes(node, { src: link.href, alt: node.alt ?? "", ...(link.title !== undefined ? { title: link.title } : {}) })}>`;
+        // CommonMark's fallback: an unresolved reference is its own source text.
+        const suffix = node.referenceType === "full" ? `[${node.label}]` : node.referenceType === "collapsed" ? "[]" : "";
+        return node.type === "linkReference" ? `[${content(node)}]${escapeHtml(suffix)}` : escapeHtml(`![${node.alt ?? ""}]${suffix}`);
+      }
+      case "footnoteReference": {
+        const label = node.label ?? "";
+        if (!notes.has(label)) return escapeHtml(`[^${label}]`);
+        const occurrence = (occurrences.get(label) ?? 0) + 1;
+        occurrences.set(label, occurrence);
+        return `<sup><a href="#fn:${escapeHtml(label)}" id="fnref:${escapeHtml(label)}${occurrence > 1 ? `:${occurrence}` : ""}" data-footnote-ref>${numbers.get(label)}</a></sup>`;
+      }
+      case "footnoteDefinition": {
+        const label = node.label ?? "";
+        const number = numbers.get(label);
+        const backlinks = Array.from({ length: counts.get(label) ?? 0 }, (_, index) => {
+          const suffix = index ? `:${index + 1}` : "";
+          return ` <a href="#fnref:${escapeHtml(label)}${suffix}" data-footnote-backref aria-label="Back to reference ${number}${index ? `-${index + 1}` : ""}">↩${index ? `<sup>${index + 1}</sup>` : ""}</a>`;
+        }).join("");
+        // Back-links close the note's last paragraph, or form their own.
+        const body = content(node);
+        return element(node, "li", body.endsWith("</p>") ? `${body.slice(0, -4)}${backlinks}</p>` : `${body}<p>${backlinks.trimStart()}</p>`, { id: `fn:${label}` });
+      }
       case "title": case "literal": return content(node);
       case "text": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "span", content(node)) : content(node);
       case "html": return node.value ?? "";

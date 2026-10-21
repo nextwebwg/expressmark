@@ -104,6 +104,10 @@ rendering is available from 0.1.2.
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
 - Nested colon containers, inline/leaf directives, open semantic types and shared string/flag attributes.
 - Mention shorthand, chips and authored TOC placeholders.
+- Footnotes: `[^label]` references and `[^label]:` definitions, kept where they
+  were written and rendered as one numbered, back-linked notes section.
+- Reference-style links and images with their `[label]: url` definitions, kept
+  in their authored form and resolved when rendering.
 - Adjacent tab grouping and explicit tabs settings, including shared selection names.
 - Leading-pipe line blocks, code captions and presentation attributes.
 - Named and positional list tables, including rich cells, headers, alignment, transpose and rectangular merges.
@@ -136,7 +140,9 @@ Recoverable source errors become `literal` nodes with optional warnings. Duplica
 attributes and YAML keys use the final value; duplicate authored IDs stay
 unchanged. Invalid ASTs, unsupported versions, unknown structural nodes, and
 unsupported source mappings throw `ConversionError` with a `code`. Unknown
-semantic subtypes remain valid. Conversion does not preserve source bytes.
+semantic subtypes remain valid. Conversion does not preserve source bytes, but
+content stays where it was written: footnote and link reference definitions keep
+their place in the body.
 
 Exported JSON types include `Document`, `Node`, `Attributes`, `Json`, `Position`,
 `Point`, `Diagnostic`, and `ConversionOptions`. Content uses exclusive `body`,

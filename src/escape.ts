@@ -1,6 +1,6 @@
 import MarkdownIt, { type StateInline } from "markdown-it";
 import { configureAutolinks } from "./autolinks.js";
-import { mentionBoundary, readAttributes, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { mentionBoundary, normalizeLabel, readAttributes, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import type { Node } from "./types.js";
 
 export interface TextContext {
@@ -10,6 +10,10 @@ export interface TextContext {
   marks?: string;
   protectAutolinks?: boolean;
   mentionStart?: boolean;
+  /** Defined footnote labels: only these make `[^label]` a reference. */
+  footnotes?: ReadonlySet<string>;
+  /** Normalized link reference labels: only these make `[label]` a link. */
+  references?: ReadonlySet<string>;
   previous?: Node;
   next?: Node;
 }
@@ -103,6 +107,14 @@ export function escapeText(value: string, context: TextContext = {}): string {
         if(char === "[") for(const ancestor of brackets) escapes.add(ancestor);
       }
     }
+    if(char === "[" && value[i+1] === "^" && context.footnotes?.size) {
+      const label=tokenHandle(value.slice(i+2));
+      if(label && value[i+2+label.length] === "]" && context.footnotes.has(label)) escapes.add(i);
+    }
+    if(char === "[" && value[i+1] !== "^" && context.references?.size) {
+      const label=/^\[((?:\\[\s\S]|[^\\[\]])+)\]/.exec(value.slice(i));
+      if(label && context.references.has(normalizeLabel(label[1]!))) escapes.add(i);
+    }
     if(char === "[") brackets.push(i);
     if(char === "]" && brackets.pop() === undefined && (context.label || mixed)) escapes.add(i);
     if(char === "@" && mentionBoundary(value,i) && (i>0 || startsMention(context))) {
@@ -140,7 +152,7 @@ export function escapeText(value: string, context: TextContext = {}): string {
           || (offset>0 || context.previous?.type === "softBreak") && /^(?:=+|-+)[ \t]*$/.test(rest)) escapes.add(offset+leading);
         const ordered=/^\d{1,9}([.)])(?=[ \t]|$)/.exec(rest);
         if(ordered) escapes.add(offset+leading+ordered[0].length-1);
-        if(/^\[[^\]]+\]:[ \t]*\S/.test(rest)) escapes.add(offset+leading);
+        if(/^\[(?:\^[^\]]*\]:|[^\]]+\]:[ \t]*\S)/.test(rest)) escapes.add(offset+leading);
         if(/^[| :\t-]+$/.test(rest) && rest.includes("|") && rest.includes("-")) escapes.add(offset+leading+rest.indexOf("|"));
       }
       offset+=line.length+1;

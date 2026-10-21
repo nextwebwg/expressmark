@@ -54,7 +54,7 @@ const html = renderHtml(parse("# Hello *world*"), {
 | Context method | Behavior |
 | --- | --- |
 | `escape(text)` | Escape `&`, `<`, `>`, and `"` for text or quoted attribute values |
-| `renderChildren()` | Render escaped `value`, or `body`/`children` through overrides; excludes `title` |
+| `renderChildren()` | Render escaped `value`, or `body`/`children` through overrides; excludes `title` and footnote definitions, which render in the document's notes section |
 | `renderDefault()` | Render the current node with its built-in mapping, keeping child overrides |
 | `render(node)` | Render another node, including a designated title, through overrides |
 
