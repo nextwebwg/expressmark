@@ -1,5 +1,6 @@
 import { escapeHtml, sanitizeHtml } from "./html.js";
-import { references, referenceOrder } from "./footnotes.js";
+import { footnoteDefinitions, linkDefinitions, references, referenceOrder } from "./references.js";
+import { normalizeLabel } from "./grammar.js";
 import { sourceKey } from "./grammar.js";
 import { ConversionError, warn, type ConversionOptions, type Document, type Node } from "./types.js";
 
@@ -35,20 +36,20 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   const active = new Set<Node>();
   const transformers = options.transformers ?? {};
   let inheritedAlignment: LayoutAlignment | undefined;
-  // The list is in first-reference order, so a note's number is its position.
-  // Only referenced notes render; each counts its references for back-links.
-  const notes = new Map<string, Node>();
-  for (const note of document.footnotes ?? []) if (typeof note.label === "string" && !notes.has(note.label)) notes.set(note.label, note);
-  const numbers = new Map((document.footnotes ?? []).map((note, index) => [note.label, index + 1]));
+  // Definitions render once, collected at the end and numbered by first
+  // reference; each note counts its references for back-links.
+  const notes = footnoteDefinitions(document);
   const rendered = referenceOrder(document, notes);
+  const numbers = new Map(rendered.map((label, index) => [label, index + 1]));
   const counts = new Map<string, number>();
   const count = (label: string) => { if (notes.has(label)) counts.set(label, (counts.get(label) ?? 0) + 1); };
-  if (document.title) references(document.title, count);
-  for (const child of document.body) references(child, count);
-  for (const label of rendered) references(notes.get(label)!, count);
+  references(document, count);
+  for (const label of rendered) for (const child of notes.get(label)!.body ?? []) references(child, count);
   const occurrences = new Map<string, number>();
+  // Reference links resolve here, against the first definition of each label.
+  const definitions = linkDefinitions(document);
   function content(node: Node): string {
-    return node.value != null ? escapeHtml(node.value) : (node.body ?? node.children ?? []).map(render).join("");
+    return node.value != null ? escapeHtml(node.value) : (node.body ?? node.children ?? []).filter(child => child?.type !== "footnoteDefinition").map(render).join("");
   }
   function title(node: Node): string {
     return typeof node.title === "string" ? escapeHtml(node.title) : node.title ? render(node.title) : "";
@@ -109,6 +110,16 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
         const value = `${node.title ? `<h1>${title(node)}</h1>` : ""}${content(node)}`;
         const items = rendered.map(label => render(notes.get(label)!)).join("");
         return items ? `${value}<section data-footnotes aria-label="Footnotes"><ol>${items}</ol></section>` : value;
+      }
+      case "definition": return "";
+      case "linkReference": case "imageReference": {
+        const definition = definitions.get(normalizeLabel(node.label ?? ""));
+        const link = { href: definition?.url ?? "", ...(typeof definition?.title === "string" ? { title: definition.title } : {}) };
+        if (definition && node.type === "linkReference") return element(node, "a", content(node), link);
+        if (definition) return `<img${attributes(node, { src: link.href, alt: node.alt ?? "", ...(link.title !== undefined ? { title: link.title } : {}) })}>`;
+        // CommonMark's fallback: an unresolved reference is its own source text.
+        const suffix = node.referenceType === "full" ? `[${node.label}]` : node.referenceType === "collapsed" ? "[]" : "";
+        return node.type === "linkReference" ? `[${content(node)}]${escapeHtml(suffix)}` : escapeHtml(`![${node.alt ?? ""}]${suffix}`);
       }
       case "footnoteReference": {
         const label = node.label ?? "";

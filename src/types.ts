@@ -28,6 +28,7 @@ export interface Node {
   meta?: string;
   ref?: string;
   label?: string;
+  referenceType?: "full" | "collapsed" | "shortcut";
   align?: ("start" | "center" | "end" | null)[];
   header?: boolean;
   colSpan?: number;
@@ -41,8 +42,6 @@ export interface Document extends Node {
   body: Node[];
   title?: Node;
   metadata?: { [key: string]: Json };
-  /** Footnote definitions, in first-reference order; unused notes follow in source order. */
-  footnotes?: Node[];
 }
 export interface Diagnostic {
   code: string;

@@ -106,7 +106,7 @@ describe("positional list tables",()=> {
     check(`- Item\n\n${input.split('\n').map(line=>`  ${line}`).join('\n')}`,[{type:"list",ordered:false,tight:false,children:[{type:"listItem",body:[p("Item"),table(row(cell("A"),cell("B")))]}]}]);
   });
   it("resolves cell references defined after the table",()=> {
-    check(`${source('- - [Guide]')}\n\n[Guide]: /guide`,[table(row({type:"tableCell",children:[{type:"link",url:"/guide",value:"Guide"}]}))]);
+    check(`${source('- - [Guide]')}\n\n[Guide]: /guide`,[table(row({type:"tableCell",children:[{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]})),{type:"definition",label:"Guide",url:"/guide"}]);
   });
 });
 

@@ -2,18 +2,19 @@
 
 ## 0.1.7
 
-- Parse, write and render footnotes. `[^label]` references a `[^label]:`
-  definition whose indented continuation holds any blocks. Definitions live in
-  `document.footnotes`, ordered by first reference, with unused notes after them
-  in source order; `stringify` writes them after the body in that order.
-- Record each definition's source `position` and original Markdown in `source`.
-  `stringify(document, { preserveSource: true })` writes an unedited definition
-  back where it was authored; an edited one moves to the canonical place.
-- Keep an undefined reference as text, and keep a repeated definition as text in
-  place so the first definition stays the note. Report undefined, unused and
-  repeated footnotes as diagnostics.
-- Render references as numbered superscript links and the notes as a labelled
-  `<section data-footnotes>` list with a back-link to every reference.
+- Parse, write and render footnotes. `[^label]` refers to a `[^label]:`
+  definition whose indented continuation holds any blocks. Definitions are
+  `footnoteDefinition` blocks that stay where they were written, including
+  duplicates and unused notes; `renderHtml` collects the first definition of
+  each referenced label into one `<section data-footnotes>`, numbered by first
+  reference, with a back-link to every reference.
+- Keep reference-style links and images in their authored form. `[label]: url`
+  definitions are `definition` blocks kept in place, and `[text][label]`,
+  `[text][]` and `[label]` are `linkReference` or `imageReference` nodes with
+  their `label` and `referenceType`. `renderHtml` resolves them; `stringify`
+  writes them as authored. Unresolved references stay text, as in CommonMark.
+- Report undefined, unused and repeated footnotes, and references a written
+  document cannot resolve, as diagnostics.
 - Read container, leaf, table and document titles after the block pass, so a
   title can refer to a note defined later in the document.
 
