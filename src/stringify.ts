@@ -2,8 +2,9 @@ import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
 import { diagnoseIds, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
 import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { parse } from "./parse.js";
 import { tableGrid, transposeTable } from "./tables.js";
-import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
+import type { Attributes, ConversionOptions, Document, Json, Node } from "./types.js";
 import { ConversionError, warn } from "./types.js";
 
 function fail(message: string): never { throw new ConversionError("unsupported-conversion",message); }
@@ -40,10 +41,10 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
     for(const [i,child] of node[slot].entries()) validate(child,`${path}.${slot}[${i}]`,seen);
   }
   if(node.title !== undefined && node.title !== null && typeof node.title !== "string") validate(node.title,`${path}.title`,seen);
-  const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
+  const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","align","header","colSpan","rowSpan","display","tag","version","metadata","footnotes"]);
   for(const key of Object.keys(node)) if(!known.has(key)) fail(`${path}.${key} has no Markdown mapping.`);
   const structural: Record<string,string[]> = {
-    document:["version","metadata"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
+    document:["version","metadata","footnotes"], footnoteReference:["label"], footnoteDefinition:["label"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
     link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
   };
   for(const key of ["ordered","tight","checked","header"] as const) if(node[key] !== undefined && typeof node[key] !== "boolean") fail(`${path}.${key} must be a boolean.`);
@@ -51,19 +52,34 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   for(const key of ["level","start","colSpan","rowSpan"] as const) if(node[key] !== undefined && (!Number.isInteger(node[key]) || node[key]! < (key === "start" ? 0:1))) fail(`${path}.${key} has an invalid integer value.`);
   if(node.align !== undefined && (!Array.isArray(node.align) || node.align.some(value=>value !== null && !["start","center","end"].includes(value)))) fail(`${path}.align needs column alignment values.`);
   if(node.type === "group" && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
-  const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","align","header","colSpan","rowSpan","display","tag","version","metadata"];
+  const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","align","header","colSpan","rowSpan","display","tag","version","metadata","footnotes"];
   for(const key of special) if(key in node && !structural[node.type]?.includes(key)) fail(`${path}.${key} is not defined for ${node.type}.`);
   if(node.subType !== undefined && !["container","inline","leaf"].includes(node.type)) fail(`${path}.subType is not defined for ${node.type}.`);
   if(node.ref !== undefined && node.subType !== "mention") fail(`${path}.ref is only defined for mentions.`);
-  if(["document","container","blockquote","listItem"].includes(node.type) && !Array.isArray(node.body)) fail(`${path} needs a block body.`);
+  if(["document","container","blockquote","listItem","footnoteDefinition"].includes(node.type) && !Array.isArray(node.body)) fail(`${path} needs a block body.`);
+  if(["footnoteReference","footnoteDefinition"].includes(node.type)) {
+    if(typeof node.label !== "string" || tokenHandle(node.label) !== node.label) fail(`${path}.label needs a footnote label.`);
+    if(node.id !== undefined || node.attributes) fail(`${path} has no footnote attribute source mapping.`);
+  }
+  if(node.type === "document" && (node as Document).footnotes !== undefined) {
+    const footnotes=(node as Document).footnotes;
+    if(!Array.isArray(footnotes)) fail(`${path}.footnotes must be an array.`);
+    const labels=new Set<string>();
+    for(const [i,note] of footnotes.entries()) {
+      if(note?.type !== "footnoteDefinition") fail(`${path}.footnotes[${i}] needs a footnoteDefinition.`);
+      validate(note,`${path}.footnotes[${i}]`,seen);
+      if(labels.has(note.label!)) fail(`${path}.footnotes defines ${note.label} more than once.`);
+      labels.add(note.label!);
+    }
+  }
   if(["list","table","tableRow"].includes(node.type) && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
   if(["paragraph","heading","title","emphasis","strong","delete","underline","highlight","lineBlock","link","tableCell"].includes(node.type) && node.value == null && node.children == null && !(node.type === "tableCell" && node.body)) fail(`${path} needs content.`);
   if(["text","inlineCode","code","html","literal"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
-  if(["image","break","softBreak","horizontalRule","leaf"].includes(node.type) && [node.value,node.children,node.body].some(value=>value != null)) fail(`${path} is bodyless.`);
+  if(["image","break","softBreak","horizontalRule","leaf","footnoteReference"].includes(node.type) && [node.value,node.children,node.body].some(value=>value != null)) fail(`${path} is bodyless.`);
   if(node.title != null && !["document","container","table","code","link","image","leaf"].includes(node.type)) fail(`${path} does not define a title.`);
   if(["code","link","image"].includes(node.type) && node.title != null && typeof node.title !== "string") fail(`${path}.title must be a string.`);
   if(["document","container","table","leaf"].includes(node.type) && node.title != null && (typeof node.title !== "object" || node.title.type !== "title")) fail(`${path}.title must be a title node.`);
-  const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline"]);
+  const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference"]);
   const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule"]);
   const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "inline";
   const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "block";
@@ -87,6 +103,8 @@ function normalizeAbsence(node: Node, seen=new Set<Node>()): Node {
   for(const key of Object.keys(copy) as (keyof Node)[]) if(copy[key] === null) delete copy[key];
   for(const key of ["body","children"] as const) if(Array.isArray(copy[key])) copy[key]=copy[key].map(child=>normalizeAbsence(child,seen));
   if(typeof copy.title === "object" && copy.title !== null) copy.title=normalizeAbsence(copy.title,seen);
+  const notes=(copy as Document).footnotes;
+  if(Array.isArray(notes)) (copy as Document).footnotes=notes.map(note=>normalizeAbsence(note,seen));
   seen.delete(node);return copy;
 }
 function validateMetadata(value: unknown, ancestors=new Set<unknown>()): void {
@@ -100,7 +118,26 @@ function validateMetadata(value: unknown, ancestors=new Set<unknown>()): void {
   ancestors.delete(value);
 }
 
-export function stringify(document: Document, options: ConversionOptions = {}): string {
+export interface StringifyOptions extends ConversionOptions {
+  /** Write each unedited footnote definition back where its source provenance places it. */
+  preserveSource?: boolean;
+}
+
+// Key order is not semantic, so compare notes through key-sorted JSON.
+function sortedJson(value: unknown): string {
+  return JSON.stringify(value,(_key,item: Json)=>item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a < b ? -1:1)):item);
+}
+// A note is unedited when its recorded Markdown still reads as its current body.
+// Stub definitions let references to the document's other notes resolve.
+function unedited(note: Node, labels: Set<string>): boolean {
+  const markdown=note.source?.markdown;
+  if(typeof markdown !== "string") return false;
+  const stubs=[...labels].filter(label=>label !== note.label).map(label=>`[^${label}]:`);
+  const reread=parse([markdown,...stubs].join("\n\n")).footnotes?.find(other=>other.label === note.label);
+  return reread !== undefined && sortedJson(reread.body) === sortedJson(note.body);
+}
+
+export function stringify(document: Document, options: StringifyOptions = {}): string {
   document=normalizeAbsence(document) as Document;
   if(document?.type !== "document" || document.version !== 1 || !Array.isArray(document.body)) throw new ConversionError("unsupported-version","Expected a document with version 1 and a body array.");
   validate(document);
@@ -114,6 +151,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(Object.hasOwn(metadata,"title") && document.title === undefined) fail("metadata.title has no independent source mapping; use the document title field.");
   }
   diagnoseIds(document,options);
+  const footnotes=new Set((document.footnotes ?? []).map(note=>note.label!));
   function content(node: Node, context: TextContext = {}): string {
     // Adjacent unstyled text has no source boundary. Escape its combined text
     // so split URL/directive prefixes cannot acquire meaning during writing.
@@ -124,7 +162,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         children[children.length-1]={...previous,value:previous.value!+child.value!};
       } else children.push(child);
     }
-    const textContext: TextContext={...context,block:["paragraph","tableCell"].includes(node.type),heading:node.type === "heading"};
+    const textContext: TextContext={...context,footnotes,block:["paragraph","tableCell"].includes(node.type),heading:node.type === "heading"};
     return node.value !== undefined ? escapeText(node.value,textContext) : children.map((child,index)=>inline(child,children[index-1],children[index+1],textContext)).join("");
   }
   function caption(node: Node): string {
@@ -221,6 +259,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         return `@[${content(node,{label:true})}]${suffix}${writeAttributes(node,extra)}`;
       }
       return `:${node.subType}${node.value !== undefined || node.children ? `[${content(node,{label:true})}]`:""}${attrs}`;
+    }
+    if(node.type === "footnoteReference") {
+      if(!footnotes.has(node.label!)) warn(options,"undefined-footnote",`Footnote [^${node.label}] has no definition; it will read back as text.`);
+      return `[^${node.label}]`;
     }
     if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return sanitizeHtml(node.value ?? "",options); }
     if(node.type === "literal") return escapeText(node.value ?? "");
@@ -341,12 +383,13 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeLiteral(node.value ?? "",options); }
     fail(`Unsupported block node: ${node.type}.`);
   }
-  function blockArray(nodes: Node[], tightList = false): string {
-    const blocks=nodes.map((node,index)=> {
+  function blockArray(nodes: Node[], tightList = false, inserts = new Map<number,string[]>()): string {
+    const inserted=(index: number)=>(inserts.get(index) ?? []).map(value=>({node:{type:"footnoteDefinition"} as Node,value}));
+    const blocks=[...nodes.flatMap((node,index)=> {
       const neighboringTabs=node.type === "container" && node.subType === "tabs"
         && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
-      return {node,value:block(node,neighboringTabs)};
-    }).filter(({value})=>Boolean(value));
+      return [...inserted(index),{node,value:block(node,neighboringTabs)}];
+    }),...inserted(nodes.length)].filter(({value})=>Boolean(value));
     // A blank line before an item's nested list would loosen the outer list.
     return blocks.map(({node,value},index)=> {
       const adjacent=tightList && node.type === "list" && blocks[index-1]?.node.type === "paragraph";
@@ -364,6 +407,20 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   }
   if(document.attributes && Object.keys(document.attributes).length) fail("Root attributes have no core frontmatter mapping.");
   const head=Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";
-  const body=blockArray(document.body);
+  // Notes follow the body in list order. A note's first block shares the marker
+  // line; every later line is indented four columns, as a list item's would be.
+  // A source-preserving write returns unedited notes to their recorded place.
+  const inserts=new Map<number,string[]>();
+  const placed=new Set<Node>();
+  if(options.preserveSource) {
+    const recorded=(document.footnotes ?? []).filter(note=>Number.isInteger(note.source?.bodyIndex) && Number(note.source!.bodyIndex) <= document.body.length && unedited(note,footnotes));
+    for(const note of recorded.sort((a,b)=>(a.position?.start.offset ?? 0)-(b.position?.start.offset ?? 0))) {
+      const index=Number(note.source!.bodyIndex);
+      inserts.set(index,[...(inserts.get(index) ?? []),String(note.source!.markdown)]);
+      placed.add(note);
+    }
+  }
+  const notes=(document.footnotes ?? []).filter(note=>!placed.has(note)).map(note=>`[^${note.label}]:${blockArray(note.body ?? []).split("\n").map((line,index)=>index === 0 ? line && ` ${line}` : line && `    ${line}`).join("\n")}`);
+  const body=[blockArray(document.body,false,inserts),...notes].filter(Boolean).join("\n\n");
   return `${head}${body}${head || body ? "\n":""}`;
 }

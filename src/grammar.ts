@@ -151,4 +151,5 @@ export function diagnoseIds(node: Node, options: ConversionOptions, seen=new Set
   if(node.id !== undefined) { if(seen.has(node.id)) warn(options,"duplicate-id",`Authored ID ${node.id} occurs more than once; it was preserved.`); seen.add(node.id); }
   if(typeof node.title === "object" && node.title !== null) diagnoseIds(node.title,options,seen);
   for(const child of node.body ?? node.children ?? []) diagnoseIds(child,options,seen);
+  if(node.type === "document") for(const note of (node as {footnotes?: Node[]}).footnotes ?? []) diagnoseIds(note,options,seen);
 }

@@ -1,10 +1,11 @@
 import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markdown-it";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
+import { referenceOrder } from "./footnotes.js";
 import { attach, compact, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
-import type { ConversionOptions, Document, Json, Node } from "./types.js";
+import type { ConversionOptions, Document, Json, Node, Point } from "./types.js";
 import { warn } from "./types.js";
 
 function line(state: StateBlock, index: number): string {
@@ -37,9 +38,12 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
   configureAutolinks(md);
+  // Definition labels, collected by the block pass before any inline content is read.
+  const footnotes=new Set<string>();
   const env: Record<string,unknown> = {};
   const tasks=new WeakMap<Node,RegExpExecArray>();
-  let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
+  const normalized = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
+  let source = normalized;
   let recoveredFrontmatter: Node | undefined;
 
   let lineMode = 0;
@@ -127,6 +131,52 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.pos+=attrs.length;
     return true;
   });
+  md.block.ruler.before("reference","footnote_definition",(state,start,end,silent) => {
+    if(state.sCount[start]! - state.blkIndent >= 4) return false;
+    const begin=state.bMarks[start]!+state.tShift[start]!;
+    const match=/^\[\^([^\]]*)\]:/.exec(state.src.slice(begin,state.eMarks[start]));
+    if(!match || tokenHandle(match[1]!) !== match[1]) return false;
+    if(silent) return true;
+    footnotes.add(match[1]!);
+    const open=state.push("footnote_open","",1); open.meta={label:match[1]};
+    // Read the note like a list item: its first line starts after the marker,
+    // and its continuation lines are indented four columns past the marker.
+    const saved={bMark:state.bMarks[start]!,tShift:state.tShift[start]!,sCount:state.sCount[start]!,parentType:state.parentType};
+    let position=begin+match[0].length;
+    const contentStart=position;
+    let offset=state.sCount[start]!+match[0].length;
+    const initial=offset;
+    while(position<state.eMarks[start]! && (state.src[position] === " " || state.src[position] === "\t")) {
+      offset+=state.src[position] === "\t" ? 4-((offset+state.bsCount[start]!)%4):1;
+      position++;
+    }
+    state.tShift[start]=position-contentStart;
+    state.sCount[start]=offset-initial;
+    state.bMarks[start]=contentStart;
+    state.blkIndent+=4;
+    state.parentType="footnote" as typeof state.parentType;
+    if(state.sCount[start]! < state.blkIndent) state.sCount[start]!+=state.blkIndent;
+    state.md.block.tokenize(state,start,end);
+    state.parentType=saved.parentType;
+    state.blkIndent-=4;
+    state.tShift[start]=saved.tShift; state.sCount[start]=saved.sCount; state.bMarks[start]=saved.bMark;
+    let last=state.line-1;
+    while(last>start && state.isEmpty(last)) last--;
+    // Offsets into the parsed source, for the definition's provenance.
+    open.meta.range=[begin,state.eMarks[last]];
+    state.push("footnote_close","",-1);
+    return true;
+  },{alt:["paragraph","reference"]});
+  md.inline.ruler.before("link","footnote_reference",(state: StateInline,silent: boolean) => {
+    if(state.src[state.pos] !== "[" || state.src[state.pos+1] !== "^") return false;
+    const label=tokenHandle(state.src.slice(state.pos+2));
+    if(!label || state.src[state.pos+2+label.length] !== "]") return false;
+    // An undefined reference stays text, as an unresolved link reference does.
+    if(!footnotes.has(label)) { if(!silent) warn(options,"undefined-footnote",`Footnote [^${label}] has no definition; it remains text.`); return false; }
+    if(!silent) { const token=state.push("footnote_ref","",0); token.meta={label}; token.content=`[^${label}]`; }
+    state.pos+=label.length+3;
+    return true;
+  });
   md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
@@ -163,7 +213,6 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       warn(options,"unclosed-container","An unclosed or mismatched container is preserved as literal source.");
       state.line=end; return true;
     }
-    title(node);
     if(node.subType === "table") {
       const body=state.getLines(start+1,close,state.blkIndent,false);
       state.push("expressive_table","",0).meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()};
@@ -182,7 +231,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const match=/^::(?!:)(.*)$/.exec(line(state,start)); if(!match) return false;
     const node=readHeader(match[1]!,options); if(!node) return false;
     if(silent) return true;
-    node.type="leaf"; delete node.body; title(node);
+    node.type="leaf"; delete node.body;
     state.push("expressive_leaf","",0).meta={node};
     state.line=start+1; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
@@ -220,6 +269,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         if(token.type === until) break;
         if(token.type === "text") nodes.push({type:"text",value:token.content});
         else if(token.type === "expressive_inline") nodes.push(token.meta!.node as Node);
+        else if(token.type === "footnote_ref") nodes.push({type:"footnoteReference",label:token.meta!.label as string});
         else if(token.type === "softbreak" || token.type === "hardbreak") nodes.push({type:token.type === "hardbreak" || lineBlock ? "break":"softBreak"});
         else if(token.type === "code_inline") nodes.push({type:"inlineCode",value:token.content});
         else if(token.type === "image") {
@@ -282,7 +332,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     return read();
   }
-  function blocks(tokens: Token[], original: string): Node[] {
+  function blocks(tokens: Token[], original: string, nested = false): Node[] {
     let cursor=0;
     function read(until?:string): Node[] {
       const nodes: Node[]=[];
@@ -348,17 +398,44 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         } else if(token.type === "hr") nodes.push({type:"horizontalRule"});
         else if(token.type === "html_block") nodes.push(...htmlNodes(token.content.trimEnd(),"block",options));
         else if(token.type === "expressive_container_open") {
-          const node=token.meta!.node as Node; node.body=read("expressive_container_close"); nodes.push(node);
+          // Titles are read after the block pass so they can refer to any footnote.
+          const node=token.meta!.node as Node; title(node); node.body=read("expressive_container_close"); nodes.push(node);
         } else if(token.type === "expressive_table") {
           // Convert after the document block pass has collected link references.
           const meta=token.meta as {node:Node;body:string;source:string};
-          const table=readListTable(meta.node,meta.body,md,value=>blocks(md.parse(value,env),value));
+          title(meta.node);
+          const table=readListTable(meta.node,meta.body,md,value=>blocks(md.parse(value,env),value,true));
           if(typeof table === "string") {
             nodes.push({type:"literal",display:"block",value:sanitizeLiteral(meta.source,options)});
             warn(options,"invalid-table",table);
           } else nodes.push(table);
         }
-        else if(token.type === "expressive_leaf") nodes.push(token.meta!.node as Node);
+        else if(token.type === "expressive_leaf") { const node=token.meta!.node as Node; title(node); nodes.push(node); }
+        else if(token.type === "footnote_open") {
+          const label=token.meta!.label as string;
+          const body=read("footnote_close");
+          if(!definitions.has(label)) {
+            const note: Node={type:"footnoteDefinition",label,body};
+            const range=token.meta!.range as [number,number] | undefined;
+            if(range && !nested) {
+              note.position={start:point(range[0]),end:point(range[1])};
+              note.source={markdown:source.slice(...range)};
+              if(until === undefined && !nested) placements.set(note,nodes.at(-1) ?? null);
+            }
+            definitions.set(label,note);
+          }
+          else {
+            // The first definition is the note. A later one stays in place as
+            // text, so writing and reading it again cannot change which wins.
+            warn(options,"duplicate-footnote",`Footnote [^${label}] is defined more than once; the first definition is the note.`);
+            const marker=`[^${label}]:`;
+            const first=body[0];
+            if(first?.type === "paragraph" && first.value !== undefined) first.value=`${marker} ${first.value}`;
+            else if(first?.type === "paragraph") compact(first,[{type:"text",value:`${marker} `},...first.children!]);
+            else body.unshift({type:"paragraph",value:marker});
+            nodes.push(...body);
+          }
+        }
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
         else if(token.type === "expressive_line_block") nodes.push(compact({type:"lineBlock"},inline(token.content,true)));
         else if(token.type === "table_open") {
@@ -402,6 +479,24 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     return read();
   }
+  const definitions=new Map<string,Node>();
+  // A top-level note's preceding body block, resolved to an index once tabs are grouped.
+  const placements=new Map<Node,Node|null>();
+  let lineStarts: number[] | undefined;
+  let frontLength=0;
+  // Points count the original input: CRLF counts both units, a BOM counts in
+  // offsets only, and frontmatter lines precede the parsed body.
+  function point(offset: number): Point {
+    if(!lineStarts) {
+      lineStarts=[markdown.startsWith("\uFEFF") ? 1:0];
+      for(const match of markdown.matchAll(/\r\n?|\n/g)) lineStarts.push(match.index+match[0].length);
+    }
+    const before=normalized.slice(0,frontLength+offset);
+    const line=before.split("\n").length-1;
+    const column=before.length-before.lastIndexOf("\n")-1;
+    return {line:line+1,column:column+1,offset:lineStarts[line]!+column};
+  }
+  let documentTitle: string | undefined;
   const front=/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(source);
   if(front) {
     const value=front[1]!;
@@ -441,14 +536,24 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(map.description !== undefined && typeof map.description !== "string") throw new Error("Frontmatter description must be a string.");
       if(map.tags !== undefined && (!Array.isArray(map.tags) || !map.tags.every(tag=>typeof tag === "string"))) throw new Error("Frontmatter tags must be a string list.");
       if(typeof map.id === "string") { document.id=map.id; delete map.id; }
-      if(typeof map.title === "string") { document.title=compact({type:"title"},inline(map.title)); delete map.title; }
+      if(typeof map.title === "string") { documentTitle=map.title; delete map.title; }
       if(Object.keys(map).length) document.metadata=map;
     } catch(error) { valid=false; warn(options,"invalid-frontmatter",error instanceof Error ? error.message : "Unsupported YAML frontmatter."); }
     if(!valid) recoveredFrontmatter={type:"literal",display:"block",value:sanitizeHtml(front[0].trimEnd(),options)};
-    source=source.slice(front[0].length);
+    source=source.slice(front[0].length); frontLength=front[0].length;
   }
   document.body=normalizeTabs(blocks(md.parse(source,env),source));
+  if(documentTitle !== undefined) document.title=compact({type:"title"},inline(documentTitle));
+  if(definitions.size) {
+    const order=referenceOrder(document,definitions);
+    for(const [label] of definitions) if(!order.includes(label)) { order.push(label); warn(options,"unused-footnote",`Footnote [^${label}] is never referenced.`); }
+    document.footnotes=order.map(label=>{ const note=definitions.get(label)!; note.body=normalizeTabs(note.body!); clearAutomatic(note); return note; });
+  }
   if(recoveredFrontmatter) document.body.unshift(recoveredFrontmatter);
+  for(const [note,previous] of placements) {
+    const index=previous === null ? -1 : document.body.findIndex(node=>node === previous || node.body?.includes(previous));
+    if(previous === null || index >= 0) note.source!.bodyIndex=index+1;
+  }
   clearAutomatic(document);
   diagnoseIds(document,options);
   return document;
