@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.13
+
+- Parse every README in a 398-document corpus of popular projects, and write
+  each one back, in both HTML profiles.
+- Advance past a mention, directive or attribute list matched while a link's
+  label is scanned; markdown-it stopped with "inline rule didn't increment
+  state.pos".
+- Map safe HTML within its context: inline HTML blocks become paragraphs, a
+  block inside inline HTML stays inline HTML, a table cell holding blocks gets
+  a block body, and a lone table row stays block HTML.
+- Collapse whitespace in HTML titles such as `<summary>`, keep an HTML table
+  whose spans form no rectangle as HTML, and write a multiline image or link
+  tooltip as native HTML.
+- End a container with its enclosing block, so content after an unclosed
+  container in a list item stays in place.
+- Scan containers in linear time, reading each block context's code and HTML
+  boundaries once. A thousand containers parse in milliseconds; the benchmark
+  suite measures them as `containers`.
+
 ## 0.1.12
 
 - Render a tight list's items without `<p>`, as CommonMark does.

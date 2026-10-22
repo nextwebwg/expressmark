@@ -2,6 +2,7 @@
 import { parseDocument } from "htmlparser2";
 import sanitize from "sanitize-html";
 import { attributeKey, compact } from "./grammar.js";
+import { tableGrid } from "./tables.js";
 import type { ConversionOptions, Node } from "./types.js";
 import { warn } from "./types.js";
 
@@ -111,16 +112,50 @@ export function safeUrl(url: string, image = false): boolean {
 }
 export function escapeHtml(value: string): string { return value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+const inlineNodes = new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline"]);
+const isInline = (node: Node) => inlineNodes.has(node.type) || ["group","html","literal"].includes(node.type) && node.display === "inline";
+// Runs of inline nodes in block content become paragraphs; blank text separates nothing.
+function wrapBlocks(items: Node[]): Node[] {
+  const result: Node[] = [];
+  let inline: Node[] = [];
+  const flush = () => { if (inline.some(n=>n.type !== "text" || n.value?.trim())) result.push(compact({type:"paragraph"},inline)); inline=[]; };
+  for (const child of items) { if (isInline(child)) inline.push(child); else { flush(); result.push(child); } }
+  flush();
+  return result;
+}
+// Elements whose children are inline content, and the structures whose children any context may hold.
+// HTML title text collapses its whitespace, as a browser renders it.
+function titled(items: Node[]): Node {
+  const children = items.map(node => node.type === "text" ? {...node, value: node.value!.replace(/\s+/g, " ")} : node);
+  const first = children[0], last = children.at(-1);
+  if (first?.type === "text") children[0] = {...first, value: first.value!.trimStart()};
+  if (last?.type === "text") children[children.length - 1] = {...children.at(-1)!, value: children.at(-1)!.value!.trimEnd()};
+  return compact({type:"title"}, children);
+}
+const inlineContent = new Set(["span","a","b","strong","em","i","s","del","u","mark","code","p","h1","h2","h3","h4","h5","h6","summary","figcaption","caption","header"]);
+const structures = new Set(["td","th","tr","thead","tbody","tfoot","table","ul","ol"]);
+type Context = "block" | "inline" | "any";
+
 export function htmlNodes(source: string, display: "inline" | "block", options: ConversionOptions): Node[] {
   const clean = sanitizeHtml(source, options);
   const document = parseDocument(clean);
   type HtmlNode = (typeof document.children)[number];
-  function convert(raw: HtmlNode, parent = ""): Node[] {
+  // Each element maps within its context. One that cannot sit there, such as a
+  // block inside inline content or a lone table row, keeps its filtered HTML.
+  function convert(raw: HtmlNode, parent = "", context: Context = "block"): Node[] {
+    const nodes = map(raw, parent, context);
+    if (context === "any" || !("name" in raw)) return nodes;
+    const fits = (node: Node) => context === "inline" ? isInline(node) : !["listItem","tableRow","tableCell"].includes(node.type);
+    if (nodes.every(fits)) return nodes;
+    return [{type:"html",display:context === "inline" ? "inline":"block",value:sanitize(clean.slice(raw.startIndex ?? 0,(raw.endIndex ?? clean.length - 1)+1),policy)}];
+  }
+  function map(raw: HtmlNode, parent: string, context: Context): Node[] {
     if (raw.type === "text") return raw.data ? [{type:"text",value:raw.data}] : [];
     if (!("name" in raw) || !("children" in raw)) return [];
     const tag = raw.name;
     const semanticContainer = tag === "section" && raw.attribs["data-type"] || tag === "div" && raw.attribs["data-type"] === "layout";
-    const children = raw.children.flatMap(child=>convert(child,semanticContainer ? "semantic-section":tag));
+    const childContext: Context = inlineContent.has(tag) || context === "inline" && !structures.has(tag) ? "inline" : structures.has(tag) ? "any" : "block";
+    const children = raw.children.flatMap(child=>convert(child,semanticContainer ? "semantic-section":tag,childContext));
     const attributes: Record<string,string|boolean> = {};
     let id: string | undefined;
     for (const [key,value] of Object.entries(raw.attribs)) {
@@ -176,7 +211,7 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
       }
       delete attributes.dataType;return finish(node);
     }
-    if(tag === "header" && parent === "semantic-section") return finish(compact({type:"title"},children));
+    if(tag === "header" && parent === "semantic-section") return finish(titled(children));
     if (tag === "p" || /^h[1-6]$/.test(tag)) return finish(compact(tag === "p" ? {type:"paragraph"} : {type:"heading",level:Number(tag[1])},children));
     const wrapper: Record<string,string> = {b:"strong",strong:"strong",em:"emphasis",i:"emphasis",s:"delete",del:"delete",u:"underline",mark:"highlight"};
     if (wrapper[tag]) return finish(compact({type:wrapper[tag]},children));
@@ -209,7 +244,7 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
       return finish(node);
     }
     if (tag === "li") return finish({type:"listItem",body:blocks()});
-    if (tag === "summary" && parent === "details" || tag === "figcaption" && parent === "figure" || tag === "caption" && parent === "table") return finish(compact({type:"title"},children));
+    if (tag === "summary" && parent === "details" || tag === "figcaption" && parent === "figure" || tag === "caption" && parent === "table") return finish(titled(children));
     if (tag === "details" || tag === "figure") {
       const node: Node = {type:"container",subType:tag,body:blocks(children.filter(n=>n.type !== "title"))};
       const title = children.find(n=>n.type === "title");
@@ -223,7 +258,7 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
       for (const [source,key] of [["colspan","colSpan"],["rowspan","rowSpan"]] as const) {
         if (raw.attribs[source] !== undefined) { node[key]=Number(raw.attribs[source]); delete attributes[source]; }
       }
-      if (children.some(n=>["paragraph","heading","list","code","container","table","blockquote"].includes(n.type))) node.body=blocks();
+      if (children.some(n=>!isInline(n))) node.body=blocks();
       else compact(node,children);
       return finish(node);
     }
@@ -232,6 +267,8 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
     if (tag === "table") {
       const node: Node = {type:"table",children:children.filter(n=>n.type === "tableRow")};
       const caption=children.find(n=>n.type === "title"); if(caption) node.title=caption;
+      // The table AST holds rectangular grids; an HTML table spanning otherwise stays opaque HTML.
+      try { tableGrid(node); } catch { return [{type:"html",display:context === "inline" ? "inline":"block",value:sanitize(clean.slice(raw.startIndex ?? 0,(raw.endIndex ?? clean.length - 1)+1),policy)}]; }
       if(typeof attributes.dataAlign === "string") {
         try { const align: unknown=JSON.parse(attributes.dataAlign); if(Array.isArray(align) && align.every(value=>value === null || ["start","center","end"].includes(value))) {node.align=align;delete attributes.dataAlign;} } catch { /* Preserve invalid authored data as an ordinary attribute. */ }
       }
@@ -242,7 +279,8 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
   }
   // Source indices are needed only for benign elements without a structured mapping.
   const indexed = parseDocument(clean,{withStartIndices:true,withEndIndices:true});
-  return indexed.children.flatMap(child=>convert(child));
+  const nodes = indexed.children.flatMap(child=>convert(child,"",display));
+  return display === "block" ? wrapBlocks(nodes) : nodes;
 }
 
 /** Inert profile payloads preserve authored scalar types, never HTML execution fields. */

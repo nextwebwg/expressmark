@@ -48,6 +48,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
+  const lexicalMd=new MarkdownIt({html:true});
+  // Per block state: table cells parse their own sources.
+  const lexicalRanges=new WeakMap<StateBlock,Map<string,{from:number;ranges:Map<number,number>}>>();
   configureAutolinks(md);
   // Definition labels, collected by the block pass before any inline content is read.
   const footnotes=new Set<string>();
@@ -126,7 +129,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       attach(node,attrs); cursor+=attrs.length; attached=true;
     }
     if(label === undefined && !attached) return false;
-    if(silent) return true;
+    // A silent match still consumes its source: link-label scans advance by it.
+    if(silent) { state.pos=cursor; return true; }
     if(label !== undefined) compact(node,inline(label));
     promote(node);
     if(bare) spell(node,"form","bare");
@@ -143,7 +147,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const last=state.tokens.at(-1);
     if(!last || !["image","link_close"].includes(last.type)) return false;
     const attrs=readAttributes(state.src.slice(state.pos),options); if(!attrs) return false;
-    if(silent) return true;
+    if(silent) { state.pos+=attrs.length; return true; }
     const existing=(last.meta ?? {}) as {attributes?: ReturnType<typeof readAttributes>[]};
     existing.attributes=[...(existing.attributes ?? []),attrs]; last.meta=existing;
     (last.meta as {attributesSource?: string}).attributesSource=`${(last.meta as {attributesSource?: string}).attributesSource ?? ""}${state.src.slice(state.pos,state.pos+attrs.length)}`;
@@ -259,13 +263,25 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     spell(node,"fence",opening[1]!.length);
     if(silent) return true;
     const length=opening[1]!.length;
+    // A container ends with its enclosing block, such as a list item: its last
+    // line comes before the first nonblank line indented less than that block.
+    if(state.blkIndent>0) for(let index=start+1;index<end;index++) if(!state.isEmpty(index) && state.sCount[index]!<state.blkIndent) { end=index; break; }
     let close=start+1;
     let code: {mark:string;length:number}|undefined;
     // Let CommonMark locate code/HTML in list and quote contexts too. Jump at
     // a token's opening line so a named field's inline fence can take priority.
-    const lexical=new MarkdownIt({html:true}).parse(state.getLines(start+1,end,state.blkIndent,false),{});
-    const literalRanges=new Map<number,number>();
-    for(const token of lexical) if(["fence","code_block","html_block"].includes(token.type) && token.map) literalRanges.set(start+1+token.map[0],start+1+token.map[1]);
+    // Code and HTML boundaries for the rest of this block context, read once per
+    // context and shared by its later containers, so scanning stays linear.
+    const key=`${end}:${state.blkIndent}`;
+    let contexts=lexicalRanges.get(state);
+    if(!contexts) lexicalRanges.set(state,contexts=new Map());
+    let lexical=contexts.get(key);
+    if(!lexical || lexical.from>start+1) {
+      const ranges=new Map<number,number>();
+      for(const token of lexicalMd.parse(state.getLines(start+1,end,state.blkIndent,false),{})) if(["fence","code_block","html_block"].includes(token.type) && token.map) ranges.set(start+1+token.map[0],start+1+token.map[1]);
+      lexical={from:start+1,ranges}; contexts.set(key,lexical);
+    }
+    const literalRanges=lexical.ranges;
     for(;close<end;close++) {
       const text=line(state,close);
       if(!code && literalRanges.has(close)) { close=literalRanges.get(close)!-1; continue; }
@@ -285,7 +301,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     if(close === end || !new RegExp(`^:{${length}}[ \\t]*$`).test(line(state,close))) {
       const token=state.push("expressive_literal","",0);
-      token.content=sanitizeHtml(state.getLines(start,end,state.blkIndent,false),options);
+      token.content=sanitizeHtml(state.getLines(start,end,state.blkIndent,false).replace(/\n+$/,""),options);
       warn(options,"unclosed-container","An unclosed or mismatched container is preserved as literal source.");
       state.line=end; return true;
     }

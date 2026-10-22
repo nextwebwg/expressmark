@@ -263,6 +263,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return typeof spaces === "number" && spaces >= 2 && next ? `${" ".repeat(spaces)}\n` : "\\\n";
     }
     if(node.type === "softBreak") { if(attrs) fail("A soft break cannot carry authored attributes in Markdown."); return "\n"; }
+    // A multiline tooltip, as HTML allows, has no Markdown title spelling.
+    if((node.type === "link" || node.type === "image") && typeof node.title === "string" && /[\r\n]/.test(node.title)) return safeNative(node);
     if(node.type === "link" || node.type === "image") {
       const form=spelling(node,"form");
       if(node.type === "link" && form && !attrs && node.title === undefined && node.value !== undefined) {
