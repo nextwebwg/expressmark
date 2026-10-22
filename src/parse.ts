@@ -289,6 +289,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     spell(node,"fence",opening[1]!.length);
     if(silent) return true;
     const length=opening[1]!.length;
+    const bare=!header.trim();
     let close=start+1;
     let code: {mark:string;length:number}|undefined;
     // Let CommonMark locate code/HTML in list and quote contexts too. Jump at
@@ -312,25 +313,43 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       const ending=/^(:{3,})[ \t]*$/.exec(text);
       if(ending && ending[1]!.length === length) break;
       if(ending && ending[1]!.length > length) break;
+      // A bare fence's closing line must come before another opening fence of
+      // its length or longer; otherwise that line closes the other container.
+      const opener=bare ? /^(:{3,})[ \t]*\S/.exec(text) : null;
+      if(opener && opener[1]!.length >= length) { close=end; break; }
     }
-    if(close === end || !new RegExp(`^:{${length}}[ \\t]*$`).test(line(state,close))) {
-      const token=state.push("expressive_literal","",0);
-      token.content=sanitizeHtml(state.getLines(start,end,state.blkIndent,false),options);
-      warn(options,"unclosed-container","An unclosed or mismatched container is preserved as literal source.");
-      state.line=end; return true;
+    const closed=close < end && new RegExp(`^:{${length}}[ \\t]*$`).test(line(state,close));
+    if(!closed && bare) {
+      // A stray bare fence is one line: kept so it round-trips, rendering nothing.
+      state.push("stray_fence","",0).content=line(state,start).trim();
+      warn(options,"stray-fence","A bare colon fence has no closing line; it is kept as a stray fence.");
+      state.line=start+1; return true;
     }
+    if(!closed) warn(options,"unclosed-container","A container has no closing line; it runs to the end of its enclosing block.");
+    const after=closed ? close+1 : close;
     if(node.subType === "table") {
       const body=state.getLines(start+1,close,state.blkIndent,false);
-      state.push("expressive_table","",0).meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()};
-      state.line=close+1; return true;
+      state.push("expressive_table","",0).meta={node,body,source:state.getLines(start,after,state.blkIndent,false).trimEnd()};
+      state.line=after; return true;
     }
     const token=state.push("expressive_container_open","",1); token.meta={node};
     const oldParent=state.parentType;
     state.parentType="container";
+    // Like a code fence's, a fence's own indentation leaves each enclosed line.
+    const indent=state.sCount[start]!-state.blkIndent;
+    const saved: [number,number,number,number][]=[];
+    if(indent>0) for(let index=start+1;index<close;index++) {
+      const spaces=/^ */.exec(state.src.slice(state.bMarks[index]!,state.bMarks[index]!+indent))![0].length;
+      const strip=Math.min(spaces,indent,state.tShift[index]!);
+      if(!strip) continue;
+      saved.push([index,state.bMarks[index]!,state.tShift[index]!,state.sCount[index]!]);
+      state.bMarks[index]!+=strip; state.tShift[index]!-=strip; state.sCount[index]!-=strip;
+    }
     state.md.block.tokenize(state,start+1,close);
+    for(const [index,bMark,tShift,sCount] of saved) { state.bMarks[index]=bMark; state.tShift[index]=tShift; state.sCount[index]=sCount; }
     state.parentType=oldParent;
     state.push("expressive_container_close","",-1);
-    state.line=close+1; return true;
+    state.line=after; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
   md.block.ruler.before("paragraph","expressive_leaf",(state,start,_end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
@@ -602,6 +621,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           defined.add(label);
           nodes.push({type:"footnoteDefinition",label,body:read("footnote_close")});
         }
+        else if(token.type === "stray_fence") nodes.push({type:"strayFence",value:token.content});
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
         else if(token.type === "expressive_line_block") {
           const node=compact({type:"lineBlock"},inline(token.content,true));

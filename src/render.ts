@@ -140,7 +140,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
         const items = rendered.map(label => render(notes.get(label)!)).join("");
         return items ? `${value}<section data-footnotes aria-label="Footnotes"><ol>${items}</ol></section>` : value;
       }
-      case "definition": return "";
+      case "definition": case "strayFence": return "";
       case "linkReference": case "imageReference": {
         const definition = definitions.get(normalizeLabel(node.label ?? ""));
         const link = { href: definition?.url ?? "", ...(typeof definition?.title === "string" ? { title: definition.title } : {}) };

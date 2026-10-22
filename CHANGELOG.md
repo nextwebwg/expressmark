@@ -7,9 +7,18 @@
   with no `subType`, rendered as a `<div>` with its attributes. A header that
   cannot be read gives a generic container that keeps the raw header in
   `source.header` and reports `invalid-container-header`.
+- Keep a stray bare `:::` with no closing line as a `strayFence` node: it
+  renders nothing, round-trips and reports `stray-fence`, and never encloses
+  following content. A bare fence closes only before any other opening fence
+  of its length or longer.
+- Run an unclosed container to the end of its enclosing block, or to a longer
+  fence, reporting `unclosed-container`, in place of literal recovery.
+- Strip a fence's own indentation from the lines it encloses, as for code fences.
 - Accept `.class` shorthand in attribute lists. Shorthands accumulate into
   `class`; an assigned `class=` replaces them, and a later list's shorthands
   add to an earlier one's. A class never becomes a container type.
+  This also fixes 0.1.8's reading of `::: note Title {.x}`: the title is
+  "Title" and `.x` a class.
 - Read bracketed spans, `[text]{attributes}`, as typeless `inline` nodes when
   the bracket is not a link, rendered as `<span>` with their attributes. Links
   and resolving references keep their lists; `![…]`, `@[…]`, `:name[…]` and

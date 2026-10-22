@@ -46,9 +46,25 @@ describe("colon fences", () => {
   it("render a generic container as a plain div with its attributes", () => {
     expect(renderHtml(parse("::: {#summary class=\"wide\"} [Summary]\nBody.\n:::"))).toBe('<div class="wide" id="summary"><header>Summary</header><p>Body.</p></div>');
   });
-  it("read a stray closing fence as an unclosed container", () => {
-    const document = parse("::: note\nA\n:::\n:::\n\nAfter.");
-    expect(document.body.map(node => node.type)).toEqual(["container","literal"]);
+  it("keep a stray bare fence as one node that renders nothing and swallows nothing", () => {
+    const seen: string[] = [];
+    const source = "::: note\nA\n:::\n:::\n\nAfter.\n\n::: tip\nC\n:::\n";
+    const document = parse(source,{onDiagnostic:d => seen.push(d.code)});
+    expect(semantic(document.body).map(node => node.type)).toEqual(["container","strayFence","paragraph","container"]);
+    expect(seen).toEqual(["stray-fence"]);
+    expect(stringify(document)).toBe("::: note\nA\n:::\n\n:::\n\nAfter.\n\n::: tip\nC\n:::\n");
+    expect(parse(stringify(document))).toEqual(document);
+    expect(renderHtml(document)).toBe('<section data-type="note"><p>A</p></section><p>After.</p><section data-type="tip"><p>C</p></section>');
+  });
+  it("run an unclosed typed container to the end of its enclosing block", () => {
+    const seen: string[] = [];
+    expect(semantic(parse("::: note\nA\n\nB",{onDiagnostic:d => seen.push(d.code)}).body)).toEqual([{type:"container",subType:"note",body:[{type:"paragraph",value:"A"},{type:"paragraph",value:"B"}]}]);
+    expect(seen).toEqual(["unclosed-container"]);
+    expect(semantic(parse(":::: outer\n::: inner\nA\n::::\n\nAfter").body)).toEqual([{type:"container",subType:"outer",body:[{type:"container",subType:"inner",body:[{type:"paragraph",value:"A"}]}]},{type:"paragraph",value:"After"}]);
+  });
+  it("strip a fence's own indentation from the lines it encloses", () => {
+    expect(semantic(parse("  ::: note\n      four after stripping\n  :::").body[0]!.body)).toEqual([{type:"code",value:"four after stripping"}]);
+    expect(semantic(parse("  ::: note\n     three after stripping\n  :::").body[0]!.body)).toEqual([{type:"paragraph",value:"three after stripping"}]);
   });
 });
 
