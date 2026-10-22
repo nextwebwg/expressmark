@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify, type Document, type Node } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
+import { semantic } from "./semantic.js";
 
 const paragraph = (value: string): Node => ({type:"paragraph",value});
 const callout = (subType: string, body: Node[], title?: string, spelling?: "alert"): Node => ({type:"container",subType,...(title ? {title:{type:"title",value:title}}:{}),...(spelling ? {spelling}:{}),body});
@@ -24,8 +25,20 @@ describe("alert conformance", () => {
     expect(document).toEqual({type:"document",version:1,body});
     expect(stringify(document)).toBe(source);
   });
+  it.each(["NOTE","Note","note"])("writes the type back in its authored case: [!%s]", type => {
+    const source = `> [!${type}] Heads up\n> Text.\n`;
+    const document = parse(source);
+    expect(document.body[0]).toMatchObject({type:"container",subType:"note",spelling:"alert"});
+    expect(stringify(document)).toBe(source);
+    expect(parse(stringify(document))).toEqual(document);
+  });
+  it("writes the lowercase type when an edit changes it", () => {
+    const document = parse("> [!NOTE]\n> Text.\n");
+    document.body[0]!.subType = "tip";
+    expect(stringify(document)).toBe("> [!tip]\n> Text.\n");
+  });
   it("matches the type case-insensitively", () => {
-    expect(parse("> [!NOTE] Heads up\n> Text.").body).toEqual([callout("note",[paragraph("Text.")],"Heads up","alert")]);
+    expect(semantic(parse("> [!NOTE] Heads up\n> Text.").body)).toEqual([callout("note",[paragraph("Text.")],"Heads up","alert")]);
   });
   it("reads the marker as an alert even when a link definition shares its label", () => {
     const document = parse("> [!note]\n> Text.\n\nSee [!note].\n\n[!note]: /notes\n");

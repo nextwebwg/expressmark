@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.11
+
+- Write an alert's type in its authored case: `> [!NOTE]`, `> [!Note]` and
+  `> [!note]` each round-trip unchanged. The authored case is recorded as
+  `source.type`; an edited type is written lowercase.
+
 ## 0.1.10
 
 - Keep the author's spelling wherever Expressive Markdown accepts more than one.
