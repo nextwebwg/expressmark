@@ -2,6 +2,8 @@
 
 ## 0.1.13
 
+- Keep a link reference definition whose title spans lines; `parse` threw
+  "An attribute value cannot contain a newline or NUL" (CommonMark example 196).
 - Parse every README in a 398-document corpus of popular projects, and write
   each one back, in both HTML profiles.
 - Advance past a mention, directive or attribute list matched while a link's

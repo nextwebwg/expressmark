@@ -586,7 +586,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const meta=token.meta as {label:string;url:string;title:string;markdown:string};
           const node: Node={type:"definition",label:meta.label,url:meta.url,...(meta.title ? {title:meta.title}:{})};
           const authored=meta.markdown;
-          if(authored && authored !== `[${node.label}]: ${destination(node.url!)}${node.title ? ` ${quoteAttribute(node.title as string)}`:""}`) spell(node,"markdown",authored);
+          // A title spanning lines has no preferred one-line form, so its source is kept.
+          const preferred=typeof node.title === "string" && /[\n\0]/.test(node.title) ? undefined : `[${node.label}]: ${destination(node.url!)}${node.title ? ` ${quoteAttribute(node.title as string)}`:""}`;
+          if(authored && authored !== preferred) spell(node,"markdown",authored);
           nodes.push(node);
         }
         else if(token.type === "footnote_open") {
