@@ -536,6 +536,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const items=node.body ?? [];
     if(options.trustedHtml) return items.map(child=>child.type === "html" ? child.value!:fenced(child)).join("\n");
     const clean=sanitizeHtml(items.map((child,index)=>child.type === "html" ? child.value!:`\u0002${index}\u0003`).join("\n"),options);
+    // oxlint-disable-next-line no-control-regex -- control characters mark fenced content by design.
     return clean.replace(/\u0002(\d+)\u0003/g,(_marker,index: string)=>fenced(items[Number(index)]!));
   }
   function fenced(node: Node): string {

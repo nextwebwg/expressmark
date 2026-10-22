@@ -550,6 +550,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(!options.trustedHtml) {
       // Filter the raw HTML as one document, so its tags stay balanced across
       // fenced content; markers hold each fenced content's place.
+      // oxlint-disable-next-line no-control-regex -- control characters mark fenced content by design.
       const clean=sanitizeHtml(body.map((node,index)=>node.type === "html" ? node.value:`\u0002${index}\u0003`).join("\n"),options).split(/\u0002(\d+)\u0003/);
       const rebuilt: Node[]=[];
       clean.forEach((part,index)=> {
