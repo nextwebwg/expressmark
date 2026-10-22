@@ -3,7 +3,7 @@ import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
-import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { htmlNodes, sanitizeFragment, sanitizeHtml, sanitizeLiteral, unmatchedTags } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import type { ConversionOptions, Document, Json, Node } from "./types.js";
 import { warn } from "./types.js";
@@ -554,7 +554,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(marker && marker !== "---") spell(node,"marker",marker);
           nodes.push(node);
         }
-        else if(token.type === "html_block") nodes.push(...(options.trustedHtml ? [{type:"html",display:"block" as const,value:token.content.trimEnd()}] : htmlNodes(token.content.trimEnd(),"block",options)));
+        else if(token.type === "html_block") {
+          // A block holding only one side of an element, as CommonMark ends HTML
+          // at a blank line, stays HTML; rendering nests the Markdown between.
+          const value=token.content.trimEnd();
+          const unmatched=unmatchedTags(value);
+          if(options.trustedHtml) nodes.push({type:"html",display:"block",value});
+          else if(unmatched.opens.length || unmatched.closes.length) { const clean=sanitizeFragment(value,options); if(clean.trim()) nodes.push({type:"html",display:"block",value:clean}); }
+          else nodes.push(...htmlNodes(value,"block",options));
+        }
         else if(token.type === "expressive_container_open") {
           // Titles are read after the block pass so they can refer to any footnote.
           const node=token.meta!.node as Node; title(node); node.body=read("expressive_container_close");

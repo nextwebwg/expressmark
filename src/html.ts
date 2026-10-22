@@ -100,6 +100,34 @@ export function sanitizeHtml(value: string, options: ConversionOptions = {}, all
   if (output !== value) warn(options, "html-filtered", "HTML was normalized or filtered by the safe documentation HTML profile.");
   return output;
 }
+const voidTags = new Set(["area","base","br","col","embed","hr","img","input","link","meta","source","track","wbr"]);
+/** A fragment's unmatched tags: closings with no opening before them, and openings it leaves open. */
+export function unmatchedTags(value: string): { closes: string[]; opens: string[] } {
+  const stack: string[] = [], closes: string[] = [];
+  for (const match of value.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<(\/?)([A-Za-z][A-Za-z0-9-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*?(\/?)>/g)) {
+    const name = match[2]!.toLowerCase();
+    if (match[1]) { const at = stack.lastIndexOf(name); if (at < 0) closes.push(name); else stack.length = at; }
+    else if (!match[3] && !voidTags.has(name)) stack.push(name);
+  }
+  return { closes, opens: stack };
+}
+/**
+ * Filter an HTML fragment while keeping its unmatched tags as authored, such as
+ * an HTML block holding only `<div class="entry">` or `</div>`, which CommonMark
+ * ends at a blank line. The sanitizer would close or drop them; here the
+ * fragment is filtered between markers, with an opening supplied before each
+ * lone closing tag and the sanitizer's own closings cut away after it.
+ */
+export function sanitizeFragment(value: string, options: ConversionOptions = {}, allowlist?: HtmlAllowlist): string {
+  const { closes, opens } = unmatchedTags(value);
+  if (!closes.length && !opens.length) return sanitizeHtml(value, options, allowlist);
+  const clean = sanitize(`${[...closes].reverse().map(name => `<${name}>`).join("")}\u0002${value}\u0003`, allowlist ? allowlistPolicy(allowlist) : policy);
+  const start = clean.indexOf("\u0002"), end = clean.indexOf("\u0003");
+  if (start < 0 || end < start) return sanitizeHtml(value, options, allowlist);
+  const result = clean.slice(start + 1, end);
+  if (result !== value) warn(options, "html-filtered", "HTML was normalized or filtered by the safe documentation HTML profile.");
+  return result;
+}
 export function sanitizeLiteral(value: string, options: ConversionOptions = {}): string {
   // Plain recovery source cannot contain HTML; preserve its Markdown punctuation.
   return value.includes("<") ? sanitizeHtml(value,options):value;

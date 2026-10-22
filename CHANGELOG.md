@@ -15,6 +15,12 @@
   tooltip as native HTML.
 - Write a tight list item's blocks without a blank line between a paragraph
   and a block that interrupts it, so the list stays tight.
+- Keep an element's opening and closing tags as authored when CommonMark puts
+  them in separate HTML blocks, such as a `<div>` or `<details>` around
+  Markdown between blank lines. Rendering nests the Markdown inside, and
+  `stringify` writes the tags back unchanged. Raw HTML passes CommonMark
+  0.31.2's 64 HTML-block and raw-HTML examples, and GFM's apart from three
+  that CommonMark 0.31 or GFM's output filter supersede.
 - End a container with its enclosing block, so content after an unclosed
   container in a list item stays in place.
 - Scan containers in linear time, reading each block context's code and HTML
