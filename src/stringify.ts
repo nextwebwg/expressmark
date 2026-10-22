@@ -479,7 +479,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
           // A body that could continue the marker line as something other than
           // a paragraph, such as a setext underline, starts after a blank line.
           const joined=node.body?.[0]?.type === "paragraph" && !/^[ \t]*(?:=+|-+)[ \t]*(?:\n|$)/.test(body);
-          const lines=[`[!${node.subType}]${node.title !== undefined ? ` ${caption(node)}`:""}`,...(body ? [...(joined ? []:[""]),...body.split("\n")]:[])];
+          const authoredType=spelling(node,"type");
+          const lines=[`[!${authoredType?.toLowerCase() === node.subType ? authoredType : node.subType}]${node.title !== undefined ? ` ${caption(node)}`:""}`,...(body ? [...(joined ? []:[""]),...body.split("\n")]:[])];
           return lines.map(line=>line ? `> ${line}`:">").join("\n");
         }
       }

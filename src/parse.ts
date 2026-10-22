@@ -486,6 +486,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const marker=alertMarker.exec(first);
           if(marker && !structuralTypes.has(marker[1]!.toLowerCase())) {
             const node: Node={type:"container",subType:marker[1]!.toLowerCase(),spelling:"alert",body:[]};
+            // The type matches case-insensitively; its authored case is a spelling.
+            if(marker[1] !== node.subType) spell(node,"type",marker[1]!);
             if(marker[2]?.trim()) node.title=compact({type:"title"},inline(marker[2].trim()));
             const rest=first.slice(marker[0].length);
             cursor+=3;
