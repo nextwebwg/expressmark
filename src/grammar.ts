@@ -165,8 +165,11 @@ export function writeAttributes(node: Node, extra: Attributes = {}): string {
   const entries = { ...node.attributes, ...extra };
   const output: string[] = [];
   if (node.id !== undefined && /[\r\n]/.test(node.id)) throw new ConversionError("unsupported-conversion","A node attachment ID must fit on one source line.");
-  // `#id` is the preferred spelling; an ID the shorthand cannot hold is assigned.
-  if (node.id !== undefined) output.push(/^[^\s&{}]+$/.test(node.id) ? `#${node.id}` : `id=${quoteAttribute(node.id)}`);
+  // `.class` and `#id` are the preferred spellings; a value the shorthand cannot hold is assigned.
+  const short = (value: string) => /^[^\s&{}"'=]+$/.test(value);
+  const classes = typeof entries.class === "string" ? entries.class.split(/\s+/).filter(Boolean) : undefined;
+  if (classes?.length && classes.every(short)) { output.push(...classes.map(name => `.${name}`)); delete entries.class; }
+  if (node.id !== undefined) output.push(short(node.id) ? `#${node.id}` : `id=${quoteAttribute(node.id)}`);
   for (const [key, value] of Object.entries(entries)) {
     const name = sourceKey(key);
     output.push(typeof value === "boolean" ? `${value ? "" : "!"}${name}` : `${name}=${quoteAttribute(value)}`);

@@ -79,8 +79,12 @@ describe("class shorthand", () => {
   it("never turns a class into a container type", () => {
     expect(first("::: {.warning}\nBody.\n:::")).toEqual({type:"container",attributes:{class:"warning"},body:[{type:"paragraph",value:"Body."}]});
   });
-  it("writes the preferred #id and class spellings for new content", () => {
-    expect(stringify({type:"document",version:1,body:[{type:"heading",level:2,id:"a",attributes:{class:"wide"},value:"A"}]})).toBe('## A {#a class="wide"}\n');
+  it("writes the preferred .class and #id spellings for new content", () => {
+    const write = (attributes: Record<string,string>, id?: string) => stringify({type:"document",version:1,body:[{type:"heading",level:2,...(id === undefined ? {} : {id}),attributes,value:"A"}]});
+    expect(write({class:"wide"},"a")).toBe("## A {.wide #a}\n");
+    expect(write({class:"one two",lang:"en"})).toBe('## A {.one .two lang="en"}\n');
+    expect(write({class:"a&b"})).toBe('## A {class="a&b"}\n');
+    for (const source of ['## A {.wide #a}','## A {#a class="wide"}','## A {id="a" class="one two"}']) expect(stringify(parse(source))).toBe(`${source}\n`);
   });
 });
 

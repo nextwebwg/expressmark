@@ -27,8 +27,9 @@
   reference form; an escaped `\!`, `\@` or `\:` leaves the bracket a span. A
   span inside link text stays inside the link. Literal span-shaped text is
   protected.
-- Write IDs as `#id`, the spec's preferred spelling, unless the ID needs
-  quoting; authored `id=` spellings are kept.
+- Write classes as `.class` and IDs as `#id`, the spec's preferred spellings,
+  as in `{.wide #intro}`, unless a value needs quoting. Authored `class=` and
+  `id=` spellings work the same and are kept.
 ## 0.1.12
 
 - Render a tight list's items without `<p>`, as CommonMark does.
