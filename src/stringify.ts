@@ -529,9 +529,11 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
       return {node,value:block(node,neighboringTabs)};
     }).filter(({value})=>Boolean(value));
-    // A blank line before an item's nested list would loosen the outer list.
+    // A blank line between an item's blocks would loosen its list.
     return blocks.map(({node,value},index)=> {
-      const adjacent=tightList && node.type === "list" && blocks[index-1]?.node.type === "paragraph";
+      // A tight item's blocks touch: a block that interrupts a paragraph follows it directly.
+      const interrupts=["list","blockquote","container","table"].includes(node.type) || node.type === "code" && node.source?.form !== "indented" || node.type === "heading" && node.source?.form !== "setext";
+      const adjacent=tightList && interrupts && blocks[index-1]?.node.type === "paragraph";
       return `${index === 0 ? "" : adjacent ? "\n":"\n\n"}${value}`;
     }).join("");
   }

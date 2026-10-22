@@ -13,6 +13,8 @@
 - Collapse whitespace in HTML titles such as `<summary>`, keep an HTML table
   whose spans form no rectangle as HTML, and write a multiline image or link
   tooltip as native HTML.
+- Write a tight list item's blocks without a blank line between a paragraph
+  and a block that interrupts it, so the list stays tight.
 - End a container with its enclosing block, so content after an unclosed
   container in a list item stays in place.
 - Scan containers in linear time, reading each block context's code and HTML

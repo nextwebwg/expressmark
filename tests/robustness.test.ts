@@ -59,3 +59,11 @@ describe("containers end with their enclosing block", () => {
     expect(semantic(parse("- item\n  ::: note\n  x\n  :::\n- next").body[0]?.children?.[0]?.body?.[1])).toEqual({type:"container",subType:"note",body:[{type:"paragraph",value:"x"}]});
   });
 });
+
+describe("tight list items", () => {
+  it.each(["- item\n  ::: note\n  x\n  :::\n", "- item\n  ```js\n  x\n  ```\n", "- item\n  > q\n", "- item\n  ## H\n"])("keep their blocks touching: %j", source => {
+    const document = parse(source);
+    expect(document.body[0]?.tight).toBe(true);
+    expect(stringify(document)).toBe(source);
+  });
+});
