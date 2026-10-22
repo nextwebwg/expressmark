@@ -75,7 +75,7 @@ delimiters.inline.ruler2.before("fragments_join","literal_pairs",state=> {
   }
 });
 
-const syntax=new MarkdownIt("zero",{html:true}).enable(["link","image","autolink","html_inline"]);
+export const syntax=new MarkdownIt("zero",{html:true}).enable(["link","image","autolink","html_inline"]);
 configureAutolinks(syntax);
 const syntaxRules=syntax.inline.ruler.getRules("");
 function opensInlineSyntax(state: StateInline, offset: number): boolean {

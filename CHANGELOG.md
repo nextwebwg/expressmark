@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.10
+
+- Keep the author's spelling wherever Expressive Markdown accepts more than one.
+  `parse` records non-preferred forms in each node's `source`, and `stringify`
+  writes them back: `_` emphasis and `__` strong, `*`/`+` bullets and `)`
+  ordered markers, repeated ordered numbers, setext and closed ATX headings,
+  tilde and longer fences, indented code, thematic-break characters,
+  trailing-space hard breaks, `<url>` and bare autolinks, link targets and
+  reference definitions as written, pipe and positional tables, explicit tab
+  groups, bare mentions, longer code spans, `[X]` tasks, container headers and
+  fence lengths, attribute lists, fence info, line-block layout and YAML
+  frontmatter. Preferred-form documents record nothing.
+- Write a recorded raw spelling only while it still reads as the node; an
+  edited node is written in the preferred form.
+- Write faster: field contracts are no longer rebuilt for every validated node.
+
 ## 0.1.9
 
 - Add trusted host content for sites whose pages only their own authors write.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { semantic } from "./semantic.js";
 
 // Original implementation fixtures organized by https://github.github.com/gfm/.
 // Assert our document AST, not GFM's HTML: Expressmark does not render HTML and
@@ -17,9 +18,10 @@ function cases(section: string, examples: Case[]): void {
       const diagnostics: Diagnostic[] = [];
       const expected: Document = {type:"document",version:1,body};
       const document = parse(source,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-      expect(document).toEqual(expected);
+      expect(semantic(document)).toEqual(expected);
       const output = stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-      expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(expected);
+      expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
+      expect(stringify(parse(output))).toBe(output);
       expect(diagnostics).toEqual([]);
     });
   });
