@@ -153,8 +153,8 @@ keep the author's spelling: `parse` records each choice between accepted forms
 in the node's `source`, such as `_` emphasis, `*` bullets, setext headings,
 tilde fences, pipe tables or an attribute list's separators, and `stringify`
 writes it back while it still reads as the node. New or edited content uses the
-preferred form. Whitespace layout inside a construct and character escapes are
-not recorded.
+preferred form. Whitespace inside a construct and character escapes follow the
+writer's canonical form.
 
 Exported JSON types include `Document`, `Node`, `Attributes`, `Json`, `Position`,
 `Point`, `Diagnostic`, and `ConversionOptions`. Content uses exclusive `body`,
