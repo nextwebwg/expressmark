@@ -72,7 +72,9 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(["list","table","tableRow"].includes(node.type) && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
   if(["paragraph","heading","title","emphasis","strong","delete","underline","highlight","lineBlock","link","linkReference","tableCell"].includes(node.type) && node.value == null && node.children == null && !(node.type === "tableCell" && node.body)) fail(`${path} needs content.`);
   if(node.type === "strayFence" && !/^:{3,}$/.test(node.value ?? "")) fail(`${path} needs a bare colon fence value.`);
-  if(["text","inlineCode","code","html","literal","strayFence"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
+  if(node.type === "html" && node.body !== undefined) {
+    if(node.display !== "block" || node.body.some(child=>!(child.type === "html" && typeof child.value === "string" || child.type === "fencedContent"))) fail(`${path}.body needs raw HTML segments and fenced content.`);
+  } else if(["text","inlineCode","code","html","literal","strayFence"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
   if(["definition","linkReference","imageReference"].includes(node.type)) {
     // A label is CommonMark link-label text: unescaped brackets close it early.
     if(typeof node.label !== "string" || !/^(?:\\[\s\S]|[^\\[\]])+$/.test(node.label) || !node.label.trim() || /\n[ \t]*\n/.test(node.label) || node.label.length>999) fail(`${path}.label needs a link label.`);
@@ -85,7 +87,8 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(["document","container","table","leaf"].includes(node.type) && node.title != null && (typeof node.title !== "object" || node.title.type !== "title")) fail(`${path}.title must be a title node.`);
   const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "inline";
   const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "block";
-  if(node.body?.some(child=>!isBlock(child))) fail(`${path}.body needs block nodes.`);
+  if(node.type === "fencedContent" && !Array.isArray(node.body)) fail(`${path} needs a block body.`);
+  if(node.type !== "html" && node.body?.some(child=>!isBlock(child))) fail(`${path}.body needs block nodes.`);
   if(node.children && !["list","table","tableRow","group"].includes(node.type) && node.children.some(child=>!isInline(child))) fail(`${path}.children needs inline nodes.`);
   if(["link","image","definition"].includes(node.type) && typeof node.url !== "string") fail(`${path} needs a string URL.`);
   if(["image","imageReference"].includes(node.type) && typeof node.alt !== "string") fail(`${path} needs string alternative text.`);
@@ -520,11 +523,35 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       const lines=blockArray(node.body ?? []).split("\n");
       return `[^${node.label}]:${lines.map((line,index)=>!line ? "" : index === 0 ? ` ${line}`:`    ${line}`).join("\n")}`;
     }
+    if(node.type === "html" && node.body) return rawElement(node);
     if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeHtml(node.value ?? "",options); }
     if(node.type === "strayFence") return node.value!;
     if(node.type === "group") return safeNative(node);
     if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeLiteral(node.value ?? "",options); }
     fail(`Unsupported block node: ${node.type}.`);
+  }
+  // Raw HTML segments stay verbatim; fenced content is written as Markdown
+  // between fence lines, indented as its opening fence was.
+  function rawElement(node: Node): string {
+    const items=node.body ?? [];
+    if(options.trustedHtml) return items.map(child=>child.type === "html" ? child.value!:fenced(child)).join("\n");
+    const clean=sanitizeHtml(items.map((child,index)=>child.type === "html" ? child.value!:`\u0002${index}\u0003`).join("\n"),options);
+    return clean.replace(/\u0002(\d+)\u0003/g,(_marker,index: string)=>fenced(items[Number(index)]!));
+  }
+  function fenced(node: Node): string {
+    const authored=spelling(node,"open");
+    const indent=/^[ \t]*/.exec(authored ?? "")![0];
+    // The fence outlasts every container fence inside it.
+    let nested=0;
+    for(const child of node.body ?? []) if(["container","table"].includes(child.type)) nested=Math.max(nested,fence(child));
+    const colons=":".repeat(Math.max(/:{3,}/.exec(authored ?? "")?.[0].length ?? 3,nested+1,3));
+    const attrs=attributes(node);
+    const authoredParts=authored ? /^[ \t]*(:{3,})[ \t]*(.*?)[ \t]*$/.exec(authored) : null;
+    const open=authoredParts && authoredParts[1] === colons && authoredParts[2] === attrs ? authored! : `${indent}${colons}${attrs ? ` ${attrs}`:""}`;
+    const recordedClose=spelling(node,"close");
+    const close=recordedClose?.trim() === colons ? recordedClose : `${indent}${colons}`;
+    const markdown=blockArray(node.body ?? []);
+    return `${open}\n${markdown ? `${markdown.split("\n").map(line=>line ? indent+line:line).join("\n")}\n`:""}${close}`;
   }
   function blockArray(nodes: Node[], tightList = false): string {
     const blocks=nodes.map((node,index)=> {

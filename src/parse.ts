@@ -4,6 +4,7 @@ import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { readElement, splitFenced } from "./raw-html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import type { ConversionOptions, Document, Json, Node } from "./types.js";
 import { warn } from "./types.js";
@@ -43,11 +44,56 @@ function codeFence(node: Node): string {
   const marker=[node.language,node.meta].some(value=>value?.includes("`")) ? "~":"`";
   return marker.repeat(Math.max(3,...Array.from((node.value ?? "").matchAll(new RegExp(`${marker}+`,"g")),m=>m[0].length+1)));
 }
+type BlockRule = (state: StateBlock,start: number,end: number,silent: boolean)=>boolean;
+/**
+ * An HTML element whose start tag begins a block runs to its matching closing
+ * tag, across blank lines, and its content is raw HTML. The element begins a
+ * block when nothing follows that closing tag on its line, so a tag opening a
+ * sentence stays inline. It does not interrupt a paragraph. Comments,
+ * declarations and stray end tags keep markdown-it's CommonMark handling.
+ */
+function htmlElements(md: InstanceType<typeof MarkdownIt>): void {
+  const original=(md.block.ruler as unknown as {__rules__:{name:string;fn:BlockRule}[]}).__rules__.find(rule=>rule.name === "html_block")!.fn;
+  md.block.ruler.at("html_block",(state,start,end,silent) => {
+    if(state.sCount[start]! - state.blkIndent >= 4) return false;
+    if(!/^<[A-Za-z]/.test(line(state,start))) return original(state,start,end,silent);
+    if(state.parentType === "paragraph") return false;
+    // Read in growing windows so long documents are not copied per element.
+    let last=Math.min(end,start+32);
+    let text: string, lead: number, found: ReturnType<typeof readElement>;
+    for(;;) {
+      text=state.getLines(start,last,state.blkIndent,false);
+      lead=/^[ \t]*/.exec(text)![0].length;
+      found=readElement(text,lead);
+      if((found?.closed) || last === end) break;
+      last=Math.min(end,start+(last-start)*2);
+    }
+    if(!found) return false;
+    const lineBreak=text.indexOf("\n",found.end);
+    if(found.closed && text.slice(found.end,lineBreak<0 ? text.length : lineBreak).trim()) return false;
+    if(silent) return true;
+    const raw=found.closed ? text.slice(lead,found.end) : text.slice(lead).replace(/\n+$/,"");
+    const lines=found.closed ? raw.split("\n").length : last-start;
+    const token=state.push("html_element","",0);
+    token.content=raw; token.meta={closed:found.closed}; token.map=[start,start+lines];
+    state.line=start+lines; return true;
+  });
+}
+
 export function parse(markdown: string, options: ConversionOptions = {}): Document {
   spelled=false;
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
+  htmlElements(md);
+  // Locates code and HTML boundaries when scanning for closing fences.
+  const lexicalMd=new MarkdownIt({html:true});
+  htmlElements(lexicalMd);
+  const literalLines=(markdown: string): Set<number> => {
+    const lines=new Set<number>();
+    for(const token of lexicalMd.parse(markdown,{})) if(["fence","code_block","html_block","html_element"].includes(token.type) && token.map) for(let index=token.map[0];index<token.map[1];index++) lines.add(index);
+    return lines;
+  };
   configureAutolinks(md);
   // Definition labels, collected by the block pass before any inline content is read.
   const footnotes=new Set<string>();
@@ -294,9 +340,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     let code: {mark:string;length:number}|undefined;
     // Let CommonMark locate code/HTML in list and quote contexts too. Jump at
     // a token's opening line so a named field's inline fence can take priority.
-    const lexical=new MarkdownIt({html:true}).parse(state.getLines(start+1,end,state.blkIndent,false),{});
+    const lexical=lexicalMd.parse(state.getLines(start+1,end,state.blkIndent,false),{});
     const literalRanges=new Map<number,number>();
-    for(const token of lexical) if(["fence","code_block","html_block"].includes(token.type) && token.map) literalRanges.set(start+1+token.map[0],start+1+token.map[1]);
+    for(const token of lexical) if(["fence","code_block","html_block","html_element"].includes(token.type) && token.map) literalRanges.set(start+1+token.map[0],start+1+token.map[1]);
     for(;close<end;close++) {
       const text=line(state,close);
       if(!code && literalRanges.has(close)) { close=literalRanges.get(close)!-1; continue; }
@@ -485,6 +531,54 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     return read();
   }
+  // A raw HTML element: verbatim HTML, with fenced content parsed as Markdown.
+  function element(raw: string, closed: boolean): Node[] {
+    if(!closed) warn(options,"unclosed-html-element","An HTML element has no matching closing tag; its content runs to the end of its enclosing block.");
+    const attributeLists=(source: string)=> { let rest=source; const lists: NonNullable<ReturnType<typeof readAttributes>>[]=[]; while(rest) { const attrs=readAttributes(rest); if(!attrs) return; lists.push(attrs); rest=rest.slice(attrs.length).trimStart(); } return lists; };
+    const {segments,unclosed}=splitFenced(raw,literalLines,source=>attributeLists(source) !== undefined);
+    if(unclosed) warn(options,"unclosed-fenced-content","A fence in raw HTML has no closing line; it stays raw HTML.");
+    if(segments.length === 1 && segments[0]!.kind === "html") return options.trustedHtml ? [{type:"html",display:"block",value:raw}] : paragraphs(htmlNodes(raw,"block",options));
+    let body: Node[]=segments.map(segment=> {
+      if(segment.kind === "html") return {type:"html",display:"block",value:segment.value};
+      const node: Node={type:"fencedContent",body:blocks(md.parse(segment.markdown,env),segment.markdown)};
+      for(const attrs of attributeLists(segment.attributes) ?? []) attach(node,attrs);
+      if(segment.attributes && segment.attributes !== writeAttributes(node)) spell(node,"attributes",segment.attributes);
+      if(segment.open !== `:::${segment.attributes ? ` ${writeAttributes(node)}`:""}`) spell(node,"open",segment.open);
+      if(segment.close !== segment.open.replace(/^([ \t]*:+).*$/,"$1")) spell(node,"close",segment.close);
+      return node;
+    });
+    if(!options.trustedHtml) {
+      // Filter the raw HTML as one document, so its tags stay balanced across
+      // fenced content; markers hold each fenced content's place.
+      const clean=sanitizeHtml(body.map((node,index)=>node.type === "html" ? node.value:`\u0002${index}\u0003`).join("\n"),options).split(/\u0002(\d+)\u0003/);
+      const rebuilt: Node[]=[];
+      clean.forEach((part,index)=> {
+        if(index%2) { rebuilt.push(body[Number(part)]!); return; }
+        const value=part.replace(index>0 ? /^\n/:/^/,"").replace(index<clean.length-1 ? /\n$/:/$/,"");
+        if(value || index>0 && index<clean.length-1) rebuilt.push({type:"html",display:"block",value});
+      });
+      body=rebuilt;
+      // Once filtering removes the element itself, its fenced content is
+      // ordinary Markdown; attributes keep their div as a generic container.
+      if(body.every(node=>node.type !== "html" || !node.value?.trim())) return body.flatMap(node=>node.type !== "fencedContent" ? []
+        : node.id !== undefined || node.attributes ? [{type:"container",body:node.body!,...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}] : node.body!);
+    }
+    return [{type:"html",display:"block",body}];
+  }
+  // A raw element mapped to inline nodes, such as `<s>…</s>`, reads as a paragraph.
+  function paragraphs(nodes: Node[]): Node[] {
+    const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","link","image","inline","break","softBreak"]);
+    const result: Node[]=[];
+    for(const node of nodes) {
+      if(inlineTypes.has(node.type) || ["group","html","literal"].includes(node.type) && node.display === "inline") {
+        const last=result.at(-1);
+        if(last?.type === "paragraph" && last.source?.mapped) last.children!.push(node);
+        else result.push({type:"paragraph",children:[node],source:{mapped:true}});
+      } else result.push(node);
+    }
+    for(const node of result) if(node.source?.mapped) { delete node.source; const children=node.children!; delete node.children; compact(node,children); }
+    return result;
+  }
   function blocks(tokens: Token[], original: string): Node[] {
     let cursor=0;
     let sourceLines: string[] | undefined;
@@ -587,6 +681,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(marker && marker !== "---") spell(node,"marker",marker);
           nodes.push(node);
         }
+        else if(token.type === "html_element") nodes.push(...element(token.content,token.meta?.closed === true));
         else if(token.type === "html_block") nodes.push(...(options.trustedHtml ? [{type:"html",display:"block" as const,value:token.content.trimEnd()}] : htmlNodes(token.content.trimEnd(),"block",options)));
         else if(token.type === "expressive_container_open") {
           // Titles are read after the block pass so they can refer to any footnote.

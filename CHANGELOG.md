@@ -2,6 +2,21 @@
 
 ## 0.1.12
 
+- Read an HTML element whose start tag begins a block, and whose closing tag
+  ends its line, as one raw block running to its matching closing tag: across
+  blank lines, counting nested same-name elements, with void and self-closing
+  elements ending at their tag. An element does not interrupt a paragraph,
+  and an unclosed one runs to the end of its enclosing block with
+  `unclosed-html-element`. Comments, declarations and stray end tags keep
+  CommonMark's handling.
+- Inside an element, a `:::` fence, optionally with attribute lists, encloses
+  fenced content: a `fencedContent` node parsed as Expressive Markdown between
+  raw HTML segments. It renders in place, inside a `<div>` when it has
+  attributes. Fence lines, indentation and raw segments round-trip.
+- Render a tight list's items without `<p>`, as CommonMark does.
+- Keep an allowed valueless `hidden` attribute; sanitize-html treated it as
+  non-boolean.
+- Reserve no heading anchor for the document's own `id`.
 - Open a container for every colon fence. A header without a type, such as
   `::: {.render}`, `::: [Title]` or a bare `:::`, gives a generic container
   with no `subType`, rendered as a `<div>` with its attributes. A header that

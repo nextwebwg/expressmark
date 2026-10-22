@@ -105,6 +105,10 @@ const html = renderHtml(document, {
 stringify(document, { trustedHtml: true }); // raw HTML written back verbatim
 ```
 
+- An HTML element whose start tag begins a block runs to its matching closing
+  tag, across blank lines, as one raw block; inside it, a `:::` fence encloses
+  fenced content, which is parsed as Expressive Markdown. Both profiles read
+  elements this way.
 - `parse` and `stringify` with `trustedHtml: true` keep raw HTML blocks and
   inline tags as opaque `html` nodes, verbatim: `<template component>`, custom
   elements, `<link rel="component">`, `<style>`, head elements and scripts.

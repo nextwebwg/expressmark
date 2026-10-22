@@ -57,6 +57,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   const active = new Set<Node>();
   const diagnostics: ConversionOptions = options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {};
   const anchors = options.headingIds ? headingAnchors(document) : undefined;
+  const tight: boolean[] = [];
   const hook = options.escapeText;
   function text(value: string): string {
     const escaped = escapeHtml(value);
@@ -170,7 +171,9 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       }
       case "title": case "literal": return content(node);
       case "text": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "span", content(node)) : content(node);
-      case "html": return node.value ?? "";
+      // Raw HTML segments join their fenced content; fence lines render nothing.
+      case "html": return node.value ?? (node.body ?? []).map(render).join("\n");
+      case "fencedContent": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "div", content(node)) : content(node);
       case "paragraph": return element(node, "p", content(node));
       case "heading":
         if (!Number.isInteger(node.level) || node.level! < 1 || node.level! > 6) throw new ConversionError("unsupported-html-node", "HTML headings need a level from 1 to 6.");
@@ -187,9 +190,14 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       case "link": return element(node, "a", content(node), { href: node.url ?? "", ...(typeof node.title === "string" ? { title: node.title } : {}) });
       case "image": return `<img${attributes(node, { src: node.url ?? "", alt: node.alt ?? "", ...(typeof node.title === "string" ? { title: node.title } : {}) })}>`;
       case "blockquote": return element(node, "blockquote", content(node));
-      case "list": return element(node, node.ordered ? "ol" : "ul", content(node), node.ordered && node.start !== undefined ? { start: node.start } : {});
+      case "list": {
+        tight.push(node.tight === true);
+        try { return element(node, node.ordered ? "ol" : "ul", content(node), node.ordered && node.start !== undefined ? { start: node.start } : {}); }
+        finally { tight.pop(); }
+      }
       // Form controls are outside the safe profile, so task status stays inert.
-      case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${content(node)}`);
+      // A tight list's paragraphs render without <p>, as CommonMark's do.
+      case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${tight.at(-1) ? (node.body ?? []).filter(child => child?.type !== "footnoteDefinition").map(child => child.type === "paragraph" && child.id === undefined && !child.attributes ? content(child) : render(child)).join("") : content(node)}`);
       case "code": {
         const code = element(node, "pre", `<code${node.language ? ` class="language-${escapeHtml(node.language)}"` : ""}>${text(node.value ?? "")}</code>`);
         return node.title ? `<figure>${code}<figcaption>${title(node)}</figcaption></figure>` : code;

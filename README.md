@@ -110,6 +110,7 @@ rendering is available from 0.1.2.
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
 - Nested colon containers, typeless generic containers, inline/leaf directives, open semantic types and shared string/flag attributes, including `#id` and `.class` shorthand.
 - Bracketed spans, `[text]{class="note"}`, for inline text with attributes.
+- Raw HTML elements that run to their matching closing tag, with `:::` fenced content inside them parsed as Markdown.
 - Alerts, `> [!note] Title`, as a supported second spelling of a callout, written back as authored.
 - Unbracketed container titles, `::: warning Before you upgrade`, written back as authored.
 - Mention shorthand, chips and authored TOC placeholders.

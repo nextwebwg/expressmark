@@ -35,7 +35,7 @@ describe("trusted host HTML", () => {
   it("renders allowlisted elements, attributes and style values", () => {
     const allow: HtmlAllowlist = {tags:["demo-card","template","button","input"],attributes:{"demo-card":["tone"],template:["component"],input:["type","checked","disabled"]},styles:{color:[/^light-dark\(#[\da-f]+, #[\da-f]+\)$/i],"--shiki-dark":[/^#[\da-f]{3,8}$/i]}};
     const document = parse('Text <demo-card tone="calm">**bold**</demo-card>.\n\n<button>Copy</button> <input type="checkbox" checked disabled>\n\n<span style="color:light-dark(#111, #eee);--shiki-dark:#abc">x</span>', {trustedHtml:true});
-    expect(renderHtml(document,{trustedHtml:allow})).toBe('<p>Text <demo-card tone="calm"><strong>bold</strong></demo-card>.</p><p><button>Copy</button> <input type="checkbox" checked disabled /></p><p><span style="color:light-dark(#111, #eee);--shiki-dark:#abc">x</span></p>');
+    expect(renderHtml(document,{trustedHtml:allow})).toBe('<p>Text <demo-card tone="calm"><strong>bold</strong></demo-card>.</p><p><button>Copy</button> <input type="checkbox" checked disabled /></p><span style="color:light-dark(#111, #eee);--shiki-dark:#abc">x</span>');
     expect(renderHtml(parse('<template component="x">\n<p>Inside</p>\n</template>',{trustedHtml:true}),{trustedHtml:allow})).toBe('<template component="x">\n<p>Inside</p>\n</template>');
   });
   it("applies the allowlist to transformer output too", () => {
@@ -46,12 +46,13 @@ describe("trusted host HTML", () => {
 describe("trusted host HTML cannot be bypassed through attributes", () => {
   const allow: HtmlAllowlist = {tags:["demo-link","button"],attributes:{"demo-link":["href"],button:["type"]}};
   it.each([
-    ['<button onclick="steal()" onmouseover="steal()" type="button">Go</button>','<p><button type="button">Go</button></p>'],
-    ['<a href="javascript:steal()">x</a>','<p><a>x</a></p>'],
-    ['<a href="jav&#97;script:steal()">x</a>','<p><a>x</a></p>'],
-    ['<demo-link href="javascript:steal()">x</demo-link>','<p><demo-link>x</demo-link></p>'],
-    ['<span style="background:url(https://example.com/track)">x</span>','<p><span>x</span></p>'],
+    ['<button onclick="steal()" onmouseover="steal()" type="button">Go</button>','<button type="button">Go</button>'],
+    ['<a href="javascript:steal()">x</a>','<a>x</a>'],
+    ['<a href="jav&#97;script:steal()">x</a>','<a>x</a>'],
+    ['<demo-link href="javascript:steal()">x</demo-link>','<demo-link>x</demo-link>'],
+    ['<span style="background:url(https://example.com/track)">x</span>','<span>x</span>'],
     ['<script>steal()</script>',""],
+  // Each input is one element alone on its line: trusted raw HTML, filtered on render.
   ])("blocks %s", (html, expected) => {
     expect(renderHtml(parse(html,{trustedHtml:true}),{trustedHtml:allow})).toBe(expected);
   });
@@ -94,5 +95,23 @@ describe("document title", () => {
     expect(document.title).toEqual({type:"title",value:"Guide"});
     expect(renderHtml(document)).toBe("<h1>Guide</h1><h1>Guide</h1><p>Body.</p>");
     expect(renderHtml(document,{title:false})).toBe("<h1>Guide</h1><p>Body.</p>");
+  });
+});
+
+describe("Markupress rendering fixes", () => {
+  it("renders a tight list's items without paragraphs and a loose list's with them", () => {
+    expect(renderHtml(parse("- One\n- Two\n  - Nested"))).toBe("<ul><li>One</li><li>Two<ul><li>Nested</li></ul></li></ul>");
+    expect(renderHtml(parse("- One\n\n- Two"))).toBe("<ul><li><p>One</p></li><li><p>Two</p></li></ul>");
+    expect(renderHtml(parse("- [x] Done"))).toBe("<ul><li>☑ Done</li></ul>");
+  });
+  it("keeps empty boolean attributes wherever the profile allows them", () => {
+    const allow: HtmlAllowlist = {tags:["input"],attributes:{"*":["hidden"],input:["type","checked","disabled"]}};
+    expect(renderHtml(parse('<div hidden="">Hidden</div>\n\n<details open=""><summary>S</summary></details>\n\n<input type="checkbox" checked="" disabled="">',{trustedHtml:true}),{trustedHtml:allow}))
+      .toBe('<div hidden>Hidden</div><details open><summary>S</summary></details><input type="checkbox" checked disabled />');
+  });
+  it("reserves no heading anchor for the document's own ID", () => {
+    const document = parse("---\nid: install\ntitle: Install\n---\n# Install\n\n## Install");
+    expect([...headingAnchors(document).values()]).toEqual(["install","install-1"]);
+    expect(renderHtml(document,{headingIds:true,title:false})).toBe('<h1 id="install">Install</h1><h2 id="install-1">Install</h2>');
   });
 });
