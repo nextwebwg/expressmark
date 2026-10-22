@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.12
+
+- Render a tight list's items without `<p>`, as CommonMark does.
+- Keep an allowed valueless `hidden` attribute. sanitize-html treated it as
+  non-boolean because of `hidden="until-found"`; `open`, `checked`, `disabled`
+  and HTML's other boolean attributes already survived.
+- Reserve no heading anchor for the document's own `id`, which is its identity
+  and is written on no element.
+
 ## 0.1.11
 
 - Write an alert's type in its authored case: `> [!NOTE]`, `> [!Note]` and
