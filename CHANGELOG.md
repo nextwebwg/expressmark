@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.12
+## 0.1.14
 
 - Open a container for every colon fence. A header without a type, such as
   `::: {.render}`, `::: [Title]` or a bare `:::`, gives a generic container
@@ -19,10 +19,16 @@
   add to an earlier one's. A class never becomes a container type.
   This also fixes 0.1.8's reading of `::: note Title {.x}`: the title is
   "Title" and `.x` a class.
+- Keep the type an unreadable container header names, with `source.rest`
+  holding the remainder it could not read.
+- End a container with its enclosing block, such as a list item.
 - Read bracketed spans, `[text]{attributes}`, as typeless `inline` nodes when
   the bracket is not a link, rendered as `<span>` with their attributes. Links
   and resolving references keep their lists; `![…]`, `@[…]`, `:name[…]` and
-  `[^…]` keep their own readings. Literal span-shaped text is protected.
+  `[^…]` keep their own readings, as does a bracket right after `]` in a
+  reference form; an escaped `\!`, `\@` or `\:` leaves the bracket a span. A
+  span inside link text stays inside the link. Literal span-shaped text is
+  protected.
 - Write IDs as `#id`, the spec's preferred spelling, unless the ID needs
   quoting; authored `id=` spellings are kept.
 

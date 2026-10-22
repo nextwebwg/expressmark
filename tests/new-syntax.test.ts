@@ -40,7 +40,7 @@ describe("colon fences", () => {
   it("keep an unreadable header as written, with a diagnostic", () => {
     const seen: Diagnostic[] = [];
     const document = parse("::: note [unclosed\nBody.\n:::", {onDiagnostic:d => seen.push(d)});
-    expect(document.body[0]).toEqual({type:"container",source:{header:" note [unclosed"},body:[{type:"paragraph",value:"Body."}]});
+    expect(document.body[0]).toEqual({type:"container",subType:"note",source:{rest:" [unclosed"},body:[{type:"paragraph",value:"Body."}]});
     expect(seen.map(d => d.code)).toEqual(["invalid-container-header"]);
   });
   it("render a generic container as a plain div with its attributes", () => {
@@ -143,5 +143,33 @@ describe("conflicts with existing syntax", () => {
   it("CommonMark definitions, unresolved brackets and braces without a valid list stay as they were", () => {
     expect(first("[w]: /u")).toEqual({type:"definition",label:"w",url:"/u"});
     expect(inlines("[w] and {.5} and [w] {.x}")).toEqual([{type:"text",value:"[w] and {.5} and [w] {.x}"}]);
+  });
+});
+
+describe("review fixes", () => {
+  it("keeps a span inside link text inside the link (M5)", () => {
+    expect(inlines("[a [b]{.x}](/u)")).toEqual([{type:"link",url:"/u",children:[{type:"text",value:"a "},{type:"inline",value:"b",attributes:{class:"x"}}]}]);
+    expect(inlines("[[w]{.x}](/u)")).toEqual([{type:"link",url:"/u",children:[{type:"inline",value:"w",attributes:{class:"x"}}]}]);
+    for (const source of ["[a [b]{.x}](/u)\n","[[w]{.x}](/u)\n"]) expect(stringify(parse(source))).toBe(source);
+  });
+  it("keeps the type an unreadable header names, with its remainder (minor 2)", () => {
+    expect(parse("::: warning [unclosed\nx\n:::").body[0]).toEqual({type:"container",subType:"warning",source:{rest:" [unclosed"},body:[{type:"paragraph",value:"x"}]});
+    expect(stringify(parse("::: warning [unclosed\nx\n:::"))).toBe("::: warning [unclosed\nx\n:::\n");
+  });
+  it("forms a span after an escaped image or mention marker (minor 3)", () => {
+    expect(inlines("\\![w]{.x}")).toEqual([{type:"text",value:"!"},{type:"inline",value:"w",attributes:{class:"x"}}]);
+    expect(inlines("\\@[w]{.x}")).toEqual([{type:"text",value:"@"},{type:"inline",value:"w",attributes:{class:"x"}}]);
+    for (const source of ["\\![w]{.x}\n","\\@[w]{.x}\n"]) expect(stringify(parse(source))).toBe(source);
+  });
+  it("keeps unresolved collapsed and full reference forms as text (minor 4)", () => {
+    expect(inlines("[w][]{.x} [w][nope]{.x}")).toEqual([{type:"text",value:"[w][]{.x} [w][nope]{.x}"}]);
+    expect(semantic(parse(stringify(parse("[w][]{.x} [w][nope]{.x}"))).body)).toEqual([{type:"paragraph",value:"[w][]{.x} [w][nope]{.x}"}]);
+  });
+  it("leaves no empty text node after a task marker (minor 5)", () => {
+    expect(first("- [ ] [w]{.x} task").children?.[0]?.body?.[0]).toEqual({type:"paragraph",children:[{type:"inline",value:"w",attributes:{class:"x"}},{type:"text",value:" task"}]});
+  });
+  it("keeps content after an unclosed container in a list item (B2)", () => {
+    expect(semantic(parse("- item\n  ::: note\n  x\n\n# Heading outside").body).at(-1)).toEqual({type:"heading",level:1,value:"Heading outside"});
+    expect(semantic(parse("- item\n  :::\n  x\n\nOutside\n:::").body).map(node => node.type)).toEqual(["list","paragraph","strayFence"]);
   });
 });

@@ -115,7 +115,9 @@ export function escapeText(value: string, context: TextContext = {}): string {
       const label=/^\[((?:\\[\s\S]|[^\\[\]])+)\]/.exec(value.slice(i));
       if(label && context.references.has(normalizeLabel(label[1]!))) escapes.add(i);
     }
-    // Literal `[text]{attributes}` would read back as a bracketed span.
+    // Literal `[text]{attributes}` would read back as a bracketed span. The
+    // bracket is escaped whatever precedes it: escaping that character could
+    // otherwise remove the shape that keeps it text.
     if(char === "[" && value[i+1] !== "^") {
       const source=literalGrammarSource(value.slice(i));
       const label=readLabel(source);
@@ -163,6 +165,11 @@ export function escapeText(value: string, context: TextContext = {}): string {
       }
       offset+=line.length+1;
     }
+  }
+  // A character that gives a following span another shape is escaped.
+  if(context.next?.type === "inline" && context.next.subType === undefined) {
+    const shape=/(?:[!@\]]|:[A-Za-z][A-Za-z0-9_-]*)$/.exec(value);
+    if(shape) escapes.add(shape.index);
   }
   if(context.heading && !context.next) {
     const closing=/[ \t](#+)[ \t]*$/.exec(value);

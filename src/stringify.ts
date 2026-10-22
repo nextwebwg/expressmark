@@ -497,6 +497,9 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         const found=node.subType === "tab" && first?.subType === "tabs" ? first.body?.[0] : first;
         return found ? {...found,...(node.type === "leaf" ? {}:{body:[]})} : undefined;
       },"header",node);
+      // An unreadable header writes its type and its kept remainder.
+      const rest=spelling(node,"rest");
+      if(rest !== undefined && node.type === "container" && node.title === undefined && !node.attributes && node.id === undefined) return `${colons}${node.subType ? ` ${node.subType}`:""}${rest}\n${blockArray(node.body ?? [])}\n${colons}`;
       const header=keep ? authored! : [node.subType,node.title !== undefined ? title(node):undefined,writeAttributes(node)].filter(Boolean).join(" ");
       return node.type === "leaf" ? `${colons}${header}` : `${colons}${keep || !header ? "":" "}${header}\n${blockArray(node.body ?? [])}\n${colons}`;
     }
@@ -532,9 +535,11 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
       return {node,value:block(node,neighboringTabs)};
     }).filter(({value})=>Boolean(value));
-    // A blank line before an item's nested list would loosen the outer list.
+    // A blank line between an item's blocks would loosen its list.
     return blocks.map(({node,value},index)=> {
-      const adjacent=tightList && node.type === "list" && blocks[index-1]?.node.type === "paragraph";
+      // A tight item's blocks touch: a block that interrupts a paragraph follows it directly.
+      const interrupts=["list","blockquote","container","table"].includes(node.type) || node.type === "code" && node.source?.form !== "indented" || node.type === "heading" && node.source?.form !== "setext";
+      const adjacent=tightList && interrupts && blocks[index-1]?.node.type === "paragraph";
       return `${index === 0 ? "" : adjacent ? "\n":"\n\n"}${value}`;
     }).join("");
   }

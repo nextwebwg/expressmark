@@ -242,11 +242,14 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   // runs after the link rule, so links and resolving references keep their
   // lists; `![…]` stays image syntax and `[^…]` footnote syntax.
   md.inline.ruler.after("link","bracketed_span",(state: StateInline,silent: boolean) => {
-    if(state.src[state.pos] !== "[" || state.src[state.pos+1] === "^") return false;
-    // A bracket after `!`, `@` or `:name` has the image, mention or inline-type
-    // shape; when that construct does not form, its source stays text.
-    const before=state.src.slice(0,state.pos);
-    if(/[!@]$|:[A-Za-z][A-Za-z0-9_-]*$/.test(before)) return false;
+    // Link-label scans see the bracket as text; a span forms when the link's
+    // own content is parsed, so a span may sit inside link text.
+    if(silent || state.src[state.pos] !== "[" || state.src[state.pos+1] === "^") return false;
+    // A bracket after an unescaped `!`, `@` or `:name` has the image, mention or
+    // inline-type shape, and one right after `]` belongs to a reference's form;
+    // when that construct does not form, its source stays text.
+    const shape=/(\\*)(?:[!@\]]|:[A-Za-z][A-Za-z0-9_-]*)$/.exec(state.src.slice(Math.max(0,state.pos-64),state.pos));
+    if(shape && shape[1]!.length%2 === 0) return false;
     const label=readLabel(state.src.slice(state.pos)); if(!label) return false;
     const attributesStart=state.pos+label.length;
     let cursor=attributesStart;
@@ -281,14 +284,20 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     // The header keeps its spacing after the colons.
     const header=opening[2]!.trimEnd();
     const parsed=readHeader(opening[2]!,silent ? {}:options,true);
-    const node: Node=parsed ?? {type:"container",body:[]};
+    // An unreadable header keeps the type it names; `source.rest` keeps what follows.
+    const named=parsed ? undefined : tokenIdentifier(header.trimStart());
+    const node: Node=parsed ?? (named && named.toLowerCase() !== "table" ? {type:"container",subType:named.toLowerCase(),body:[]} : {type:"container",body:[]});
     const label=typeof node.title === "object" ? node.title.value : undefined;
     const parts=[node.subType,label === undefined ? undefined : node.titleSpelling === "unbracketed" ? label : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ");
-    if(!parsed || header !== (parts ? ` ${parts}`:"")) spell(node,"header",header);
+    if(!parsed) spell(node,"rest",node.subType ? header.trimStart().slice(named!.length) : header);
+    else if(header !== (parts ? ` ${parts}`:"")) spell(node,"header",header);
     if(!parsed && !silent) warn(options,"invalid-container-header",`The container header "${header.trim()}" could not be read; it is kept as written.`);
     spell(node,"fence",opening[1]!.length);
     if(silent) return true;
     const length=opening[1]!.length;
+    // A container ends with its enclosing block, such as a list item: its last
+    // line comes before the first nonblank line indented less than that block.
+    if(state.blkIndent>0) for(let index=start+1;index<end;index++) if(!state.isEmpty(index) && state.sCount[index]!<state.blkIndent) { end=index; break; }
     const bare=!header.trim();
     let close=start+1;
     let code: {mark:string;length:number}|undefined;
@@ -566,7 +575,16 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(first?.type === "paragraph") {
             const text=first.value ?? (first.children?.[0]?.type === "text" ? first.children[0].value : undefined);
             const task=tasks.get(first);
-            if(task) { node.checked=task[1]!.toLowerCase() === "x"; if(task[1] === "X") spell(node,"marker","X"); if(first.value !== undefined) first.value=first.value.slice(task[0].length); else first.children![0]!.value=text!.slice(task[0].length); }
+            if(task) {
+              node.checked=task[1]!.toLowerCase() === "x";
+              if(task[1] === "X") spell(node,"marker","X");
+              if(first.value !== undefined) first.value=first.value.slice(task[0].length);
+              else {
+                // The marker leaves no empty text node before the item's content.
+                const rest=text!.slice(task[0].length);
+                if(rest) first.children![0]!.value=rest; else first.children!.shift();
+              }
+            }
           }
           nodes.push(node);
         } else if(token.type === "fence" || token.type === "code_block") {

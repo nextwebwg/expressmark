@@ -28,7 +28,7 @@ describe("container title spellings", () => {
   it("reads a bracketed title followed by words as a generic container keeping its header", () => {
     const seen: string[] = [];
     const document = parse("::: note [Title] extra\nBody.\n:::\n",{onDiagnostic:d => seen.push(d.code)});
-    expect(document.body).toEqual([{type:"container",source:{header:" note [Title] extra"},body:[{type:"paragraph",value:"Body."}]}]);
+    expect(document.body).toEqual([{type:"container",subType:"note",source:{rest:" [Title] extra"},body:[{type:"paragraph",value:"Body."}]}]);
     expect(seen).toEqual(["invalid-container-header"]);
     expect(stringify(document)).toBe("::: note [Title] extra\nBody.\n:::\n");
   });
