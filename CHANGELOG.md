@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.9
+
+- Add trusted host content for sites whose pages only their own authors write.
+  `parse` and `stringify` with `trustedHtml: true` keep raw HTML verbatim as
+  opaque `html` nodes. `renderHtml` takes a `trustedHtml` allowlist of
+  elements, attributes, style properties and URL schemes, applied to all of
+  its output. Event handlers and `javascript:` URLs stay blocked unless listed
+  by name. The strict safe profile remains the default.
+- Export `headingAnchors` and `anchorText`, the recommended anchor algorithm,
+  and add the `headingIds` render option that writes those IDs.
+- Add the `escapeText` render option, applied to every rendered text run and
+  code value after the safe profile, never to raw HTML or attributes.
+- Add the `title: false` render option, which leaves out the designated
+  title's `<h1>` while `document.title` stays populated.
+
 ## 0.1.8
 
 - Read alerts, `> [!type] Optional title`, as callouts: the same `container`

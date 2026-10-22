@@ -31,7 +31,7 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
       .toBe(readFileSync(join(root, "LICENSE"), "utf8"));
     const exports = execFileSync(process.execPath, ["--input-type=module", "--eval",
       'import * as api from "expressmark"; console.log(JSON.stringify(Object.keys(api)));'], options);
-    expect(JSON.parse(exports)).toEqual(["ConversionError", "parse", "stringify"]);
+    expect(JSON.parse(exports)).toEqual(["ConversionError", "anchorText", "headingAnchors", "parse", "stringify"]);
     const rendered = execFileSync(process.execPath, ["--input-type=module", "--eval",
       'import {parse} from "expressmark"; import {renderHtml} from "expressmark/render"; console.log(renderHtml(parse("# Hello"), {transformers:{heading:(_node,ctx)=>`<aside>${ctx.renderChildren()}</aside>`}}));'], options);
     expect(rendered.trim()).toBe("<aside>Hello</aside>");

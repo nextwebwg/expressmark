@@ -71,6 +71,12 @@ strings into HTML. Custom output passes through the same safe HTML profile as
 default output. See [the transformer guide](docs/html-transformers.md) for lookup
 order, titles, omission, defaults and output-policy limits.
 
+Render options add heading anchor IDs, leave out the designated title's `<h1>`,
+and pass every text run through a host escaping hook. A site whose pages only
+its own authors write can keep raw HTML and admit its components with
+[trusted host content](docs/safe-html.md#trusted-host-content); the default
+stays the strict safe profile.
+
 Open semantic types and attributes cover most application customization without
 new grammar. markdown-it is an internal engine; Expressmark exposes no supported
 parser-plugin or engine-configuration API.
