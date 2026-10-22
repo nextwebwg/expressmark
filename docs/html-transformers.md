@@ -62,6 +62,30 @@ const html = renderHtml(parse("# Hello *world*"), {
 `renderChildren()` treats `value` as text. Calling `render()` on an active ancestor
 throws `ConversionError` with code `cyclic-html-node`.
 
+## Page rendering options
+
+```ts
+renderHtml(document, {
+  headingIds: true,        // recommended anchors on headings without an authored ID
+  title: false,            // leave out the designated title's <h1>; document.title remains
+  escapeText: html => html.replace(/\{/g, "&#123;"), // every text run and code value
+});
+```
+
+`headingIds` uses `headingAnchors(document)`, exported from `expressmark`,
+which returns each heading's ID by the specification's
+[recommended anchor algorithm](https://nextwebwg.org/expressive-markdown/parsing#recommended-output-anchors):
+authored IDs are reserved first, other headings take their text's anchor, and
+collisions add `-1`, `-2` and so on. Call it to build outlines and cross-page
+links that match the rendered IDs. `anchorText(text)` gives one text's anchor.
+
+`escapeText` runs after the safe profile on every rendered text run and code
+value, such as escaping `{` for a template host. It receives HTML-escaped text
+and returns HTML. Raw HTML, attribute values and transformer markup never pass
+through it; text a transformer renders through `context.render` or
+`renderChildren` does. Trusted host HTML is described in the
+[safe HTML profile](safe-html.md#trusted-host-content).
+
 ## Defaults and output policy
 
 Common Markdown maps to native paragraphs, headings, formatting, lists, quotes,

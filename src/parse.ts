@@ -327,7 +327,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         } else if(["em_open","strong_open","s_open"].includes(token.type)) {
           const type=token.type === "em_open" ? "emphasis" : token.type === "s_open" ? "delete":"strong";
           nodes.push(compact({type},read(token.type.replace("_open","_close"))));
-        } else if(token.type === "html_inline") {
+        } else if(token.type === "html_inline" && options.trustedHtml) nodes.push({type:"html",display:"inline",value:token.content});
+        else if(token.type === "html_inline") {
           const open=/^<([a-z][\w:-]*)\b[^>]*>$/i.exec(token.content);
           if(open && !/\/\s*>$/.test(token.content) && !["br","img","hr","wbr"].includes(open[1]!.toLowerCase())) {
             let nesting=1;
@@ -451,7 +452,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(rest) node.meta=rest;
           promote(node); nodes.push(node);
         } else if(token.type === "hr") nodes.push({type:"horizontalRule"});
-        else if(token.type === "html_block") nodes.push(...htmlNodes(token.content.trimEnd(),"block",options));
+        else if(token.type === "html_block") nodes.push(...(options.trustedHtml ? [{type:"html",display:"block" as const,value:token.content.trimEnd()}] : htmlNodes(token.content.trimEnd(),"block",options)));
         else if(token.type === "expressive_container_open") {
           // Titles are read after the block pass so they can refer to any footnote.
           const node=token.meta!.node as Node; title(node); node.body=read("expressive_container_close"); nodes.push(node);

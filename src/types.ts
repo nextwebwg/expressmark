@@ -52,7 +52,15 @@ export interface Diagnostic {
   message: string;
   severity: "warning";
 }
-export interface ConversionOptions { onDiagnostic?: (diagnostic: Diagnostic) => void }
+export interface ConversionOptions {
+  onDiagnostic?: (diagnostic: Diagnostic) => void;
+  /**
+   * Keep raw HTML verbatim as opaque `html` nodes, unfiltered. Only for content
+   * the site's own authors write, never user-submitted or third-party content;
+   * `renderHtml` still applies its profile and the host's allowlist.
+   */
+  trustedHtml?: boolean;
+}
 export class ConversionError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {

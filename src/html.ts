@@ -45,8 +45,54 @@ const policy: sanitize.IOptions = {
   allowProtocolRelative: false,
   nonTextTags: ["script", "style", "textarea", "option", "iframe", "object", "embed", "svg", "math", "template"],
 };
-export function sanitizeHtml(value: string, options: ConversionOptions = {}): string {
-  const output = sanitize(value, policy);
+/**
+ * Additions to the safe profile for content the site's own authors write.
+ * Never use it for user-submitted, imported or third-party content.
+ */
+export interface HtmlAllowlist {
+  /** Extra elements, such as custom elements, `button`, `input` or `template`. */
+  tags?: readonly string[];
+  /**
+   * Extra attributes per element name, or `"*"` for every element. Names are
+   * exact or end in `-*` for a prefix. An event-handler name such as `onclick`
+   * must be listed exactly: it runs script, so it grants the content script access.
+   */
+  attributes?: Readonly<Record<string, readonly string[]>>;
+  /** Extra style properties, exact names such as `--shiki-dark`, with allowed value patterns. */
+  styles?: Readonly<Record<string, readonly RegExp[]>>;
+  /** Extra URL schemes. `javascript` runs script from a link, so list it only for script-trusted content. */
+  schemes?: readonly string[];
+}
+const allowlistPolicies = new WeakMap<HtmlAllowlist, sanitize.IOptions>();
+function allowlistPolicy(allowlist: HtmlAllowlist): sanitize.IOptions {
+  const cached = allowlistPolicies.get(allowlist);
+  if (cached) return cached;
+  const attributes: Record<string, string[]> = { ...(policy.allowedAttributes as Record<string, string[]>) };
+  for (const [tag, names] of Object.entries(allowlist.attributes ?? {})) {
+    for (const name of names) {
+      // A wildcard could admit event handlers, so only a named prefix may end in *.
+      if (!/^[a-zA-Z][\w:.-]*(?:-\*)?$/.test(name)) throw new TypeError(`Unsupported allowlisted attribute ${name}; use an exact name or a prefix ending in -*.`);
+    }
+    attributes[tag] = [...(attributes[tag] ?? []), ...names];
+  }
+  const styles = { ...(policy.allowedStyles!["*"] as Record<string, RegExp[]>) };
+  for (const [name, patterns] of Object.entries(allowlist.styles ?? {})) styles[name] = [...(styles[name] ?? []), ...patterns];
+  const tags = new Set(allowlist.tags ?? []);
+  const result: sanitize.IOptions = {
+    ...policy,
+    allowedTags: [...(policy.allowedTags as string[]), ...tags],
+    allowedAttributes: attributes,
+    allowedStyles: { "*": styles },
+    allowedSchemes: [...(policy.allowedSchemes as string[]), ...(allowlist.schemes ?? [])],
+    // An allowlisted element keeps its content; the host chose it explicitly.
+    nonTextTags: (policy.nonTextTags ?? []).filter(tag => !tags.has(tag)),
+    allowVulnerableTags: tags.has("script") || tags.has("style"),
+  };
+  allowlistPolicies.set(allowlist, result);
+  return result;
+}
+export function sanitizeHtml(value: string, options: ConversionOptions = {}, allowlist?: HtmlAllowlist): string {
+  const output = sanitize(value, allowlist ? allowlistPolicy(allowlist) : policy);
   if (output !== value) warn(options, "html-filtered", "HTML was normalized or filtered by the safe documentation HTML profile.");
   return output;
 }
