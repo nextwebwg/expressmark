@@ -42,6 +42,9 @@ const policy: sanitize.IOptions = {
     },
   },
   allowedSchemes: ["http", "https", "mailto", "tel"],
+  // sanitize-html removes empty `hidden` as non-boolean, for `hidden="until-found"`;
+  // HTML's `hidden` is boolean, so an allowed valueless one survives.
+  nonBooleanAttributes: sanitize.defaults.nonBooleanAttributes.filter(name => name !== "hidden"),
   allowProtocolRelative: false,
   nonTextTags: ["script", "style", "textarea", "option", "iframe", "object", "embed", "svg", "math", "template"],
 };
