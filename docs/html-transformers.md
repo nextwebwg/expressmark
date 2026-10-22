@@ -75,8 +75,9 @@ renderHtml(document, {
 `headingIds` uses `headingAnchors(document)`, exported from `expressmark`,
 which returns each heading's ID by the specification's
 [recommended anchor algorithm](https://nextwebwg.org/expressive-markdown/parsing#recommended-output-anchors):
-authored IDs are reserved first, other headings take their text's anchor, and
-collisions add `-1`, `-2` and so on. Call it to build outlines and cross-page
+IDs authored in the body are reserved first, other headings take their text's
+anchor, and collisions add `-1`, `-2` and so on. The document's own `id` is its
+identity, written on no element, so it reserves no anchor. Call it to build outlines and cross-page
 links that match the rendered IDs. `anchorText(text)` gives one text's anchor.
 
 `escapeText` runs after the safe profile on every rendered text run and code

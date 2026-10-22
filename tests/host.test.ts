@@ -96,3 +96,21 @@ describe("document title", () => {
     expect(renderHtml(document,{title:false})).toBe("<h1>Guide</h1><p>Body.</p>");
   });
 });
+
+describe("Markupress rendering fixes", () => {
+  it("renders a tight list's items without paragraphs and a loose list's with them", () => {
+    expect(renderHtml(parse("- One\n- Two\n  - Nested"))).toBe("<ul><li>One</li><li>Two<ul><li>Nested</li></ul></li></ul>");
+    expect(renderHtml(parse("- One\n\n- Two"))).toBe("<ul><li><p>One</p></li><li><p>Two</p></li></ul>");
+    expect(renderHtml(parse("- [x] Done"))).toBe("<ul><li>☑ Done</li></ul>");
+  });
+  it("keeps empty boolean attributes wherever the profile allows them", () => {
+    const allow: HtmlAllowlist = {tags:["input"],attributes:{"*":["hidden"],input:["type","checked","disabled"]}};
+    expect(renderHtml(parse('<div hidden="">Hidden</div>\n\n<details open=""><summary>S</summary></details>\n\n<input type="checkbox" checked="" disabled="">',{trustedHtml:true}),{trustedHtml:allow}))
+      .toBe('<div hidden>Hidden</div><details open><summary>S</summary></details><input type="checkbox" checked disabled />');
+  });
+  it("reserves no heading anchor for the document's own ID", () => {
+    const document = parse("---\nid: install\ntitle: Install\n---\n# Install\n\n## Install");
+    expect([...headingAnchors(document).values()]).toEqual(["install","install-1"]);
+    expect(renderHtml(document,{headingIds:true,title:false})).toBe('<h1 id="install">Install</h1><h2 id="install-1">Install</h2>');
+  });
+});

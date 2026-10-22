@@ -6,7 +6,7 @@ const document = (...body: Node[]): Document => ({ type: "document", version: 1,
 describe("HTML transformers", () => {
   it("renders Markdown with escaped text, formatting, lists, code and links", () => {
     const source = '# Hello\n\nA **bold** [link](https://example.com) & `code`.\n\n- First\n- Second\n\n```js\na < b\n```';
-    expect(renderHtml(parse(source))).toBe('<h1>Hello</h1><p>A <strong>bold</strong> <a href="https://example.com">link</a> &amp; <code>code</code>.</p><ul><li><p>First</p></li><li><p>Second</p></li></ul><pre><code class="language-js">a &lt; b</code></pre>');
+    expect(renderHtml(parse(source))).toBe('<h1>Hello</h1><p>A <strong>bold</strong> <a href="https://example.com">link</a> &amp; <code>code</code>.</p><ul><li>First</li><li>Second</li></ul><pre><code class="language-js">a &lt; b</code></pre>');
   });
   it("retains child overrides when wrapping a node's default renderer", () => {
     expect(renderHtml(parse("# Hello *world*"), { transformers: {

@@ -18,13 +18,14 @@ function walk(node: Node, visit: (node: Node) => void, active = new Set<Node>())
 
 /**
  * Each heading's output ID by the specification's recommended anchor
- * algorithm: authored IDs are reserved first and kept; other headings take
+ * algorithm: the authored IDs of nodes in the body are reserved first and kept; other headings take
  * their text's anchor, with `-1`, `-2` and so on after a collision. The AST is
  * not changed.
  */
 export function headingAnchors(document: Node): Map<Node, string> {
   const used = new Set<string>();
-  walk(document, node => { if (typeof node.id === "string") used.add(node.id); });
+  // The document's own ID is its identity; rendering writes it on no element.
+  walk(document, node => { if (typeof node.id === "string" && node !== document) used.add(node.id); });
   const anchors = new Map<Node, string>();
   walk(document, node => {
     if (node.type !== "heading") return;

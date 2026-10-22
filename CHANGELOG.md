@@ -4,9 +4,9 @@
 
 - Open a container for every colon fence. A header without a type, such as
   `::: {.render}`, `::: [Title]` or a bare `:::`, gives a generic container
-  with no `subType`, rendered as a `<div>` with its attributes. A header that
-  cannot be read gives a generic container that keeps the raw header in
-  `source.header` and reports `invalid-container-header`.
+  with no `subType`, rendered as a `<div>` with its attributes. An unreadable
+  header keeps the type it names, with `source.rest` holding the remainder,
+  and reports `invalid-container-header`.
 - Keep a stray bare `:::` with no closing line as a `strayFence` node: it
   renders nothing, round-trips and reports `stray-fence`, and never encloses
   following content. A bare fence closes only before any other opening fence
@@ -19,8 +19,6 @@
   add to an earlier one's. A class never becomes a container type.
   This also fixes 0.1.8's reading of `::: note Title {.x}`: the title is
   "Title" and `.x` a class.
-- Keep the type an unreadable container header names, with `source.rest`
-  holding the remainder it could not read.
 - End a container with its enclosing block, such as a list item.
 - Read bracketed spans, `[text]{attributes}`, as typeless `inline` nodes when
   the bracket is not a link, rendered as `<span>` with their attributes. Links
@@ -31,6 +29,14 @@
   protected.
 - Write IDs as `#id`, the spec's preferred spelling, unless the ID needs
   quoting; authored `id=` spellings are kept.
+## 0.1.12
+
+- Render a tight list's items without `<p>`, as CommonMark does.
+- Keep an allowed valueless `hidden` attribute. sanitize-html treated it as
+  non-boolean because of `hidden="until-found"`; `open`, `checked`, `disabled`
+  and HTML's other boolean attributes already survived.
+- Reserve no heading anchor for the document's own `id`, which is its identity
+  and is written on no element.
 
 ## 0.1.11
 
