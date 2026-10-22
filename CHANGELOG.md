@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.12
+
+- Open a container for every colon fence. A header without a type, such as
+  `::: {.render}`, `::: [Title]` or a bare `:::`, gives a generic container
+  with no `subType`, rendered as a `<div>` with its attributes. A header that
+  cannot be read gives a generic container that keeps the raw header in
+  `source.header` and reports `invalid-container-header`.
+- Accept `.class` shorthand in attribute lists. Shorthands accumulate into
+  `class`; an assigned `class=` replaces them, and a later list's shorthands
+  add to an earlier one's. A class never becomes a container type.
+- Read bracketed spans, `[text]{attributes}`, as typeless `inline` nodes when
+  the bracket is not a link, rendered as `<span>` with their attributes. Links
+  and resolving references keep their lists; `![…]`, `@[…]`, `:name[…]` and
+  `[^…]` keep their own readings. Literal span-shaped text is protected.
+- Write IDs as `#id`, the spec's preferred spelling, unless the ID needs
+  quoting; authored `id=` spellings are kept.
+
 ## 0.1.11
 
 - Write an alert's type in its authored case: `> [!NOTE]`, `> [!Note]` and

@@ -196,13 +196,15 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       }
       case "group": return element(node, node.display === "inline" ? "span" : "div", content(node));
       case "lineBlock": return element(node, "div", content(node), { "data-type": "line-block", style: "white-space:pre-line" });
-      case "inline": case "leaf": return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { "data-type": node.subType ?? "", ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
+      case "inline": case "leaf": return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { ...(node.subType !== undefined ? { "data-type": node.subType } : {}), ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
       case "container": {
         if (node.subType === "layout") return layout(node);
         const heading = title(node);
         if (node.subType === "details") return element(node, "details", `${node.title ? `<summary>${heading}</summary>` : ""}${content(node)}`);
         if (node.subType === "figure") return element(node, "figure", `${content(node)}${node.title ? `<figcaption>${heading}</figcaption>` : ""}`);
-        return element(node, "section", `${node.title ? `<header>${heading}</header>` : ""}${content(node)}`, { "data-type": node.subType ?? "" });
+        // A generic container is a plain div; it has no semantic type to name.
+        if (node.subType === undefined) return element(node, "div", `${node.title ? `<header>${heading}</header>` : ""}${content(node)}`);
+        return element(node, "section", `${node.title ? `<header>${heading}</header>` : ""}${content(node)}`, { "data-type": node.subType });
       }
       case "table": return element(node, "table", `${node.title ? `<caption>${title(node)}</caption>` : ""}${content(node)}`);
       case "tableRow": return element(node, "tr", content(node));

@@ -57,7 +57,7 @@ describe("alert writing", () => {
   it("writes the preferred colon form for new callouts and for alerts with attributes", () => {
     const seen: string[] = [];
     expect(stringify({type:"document",version:1,body:[callout("tip",[paragraph("New.")])]})).toBe("::: tip\nNew.\n:::\n");
-    expect(stringify({type:"document",version:1,body:[{...callout("tip",[paragraph("Tagged.")],undefined,"alert"),id:"t"}]},{onDiagnostic:d => seen.push(d.code)})).toBe('::: tip {id="t"}\nTagged.\n:::\n');
+    expect(stringify({type:"document",version:1,body:[{...callout("tip",[paragraph("Tagged.")],undefined,"alert"),id:"t"}]},{onDiagnostic:d => seen.push(d.code)})).toBe('::: tip {#t}\nTagged.\n:::\n');
     expect(seen).toEqual(["unsupported-alert"]);
   });
 });

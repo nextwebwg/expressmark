@@ -115,6 +115,12 @@ export function escapeText(value: string, context: TextContext = {}): string {
       const label=/^\[((?:\\[\s\S]|[^\\[\]])+)\]/.exec(value.slice(i));
       if(label && context.references.has(normalizeLabel(label[1]!))) escapes.add(i);
     }
+    // Literal `[text]{attributes}` would read back as a bracketed span.
+    if(char === "[" && value[i+1] !== "^") {
+      const source=literalGrammarSource(value.slice(i));
+      const label=readLabel(source);
+      if(label && readAttributes(source.slice(label.length))) escapes.add(i);
+    }
     if(char === "[") brackets.push(i);
     if(char === "]" && brackets.pop() === undefined && (context.label || mixed)) escapes.add(i);
     if(char === "@" && mentionBoundary(value,i) && (i>0 || startsMention(context))) {

@@ -189,10 +189,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "softBreak") return "\n";
     if(node.type === "image") return `<img${attrsHtml(node,{src:node.url ?? "",alt:node.alt ?? "",...(typeof node.title === "string" ? {title:node.title}:{})})}>`;
     if(node.type === "link") return wrapper("a",kids(),{href:node.url ?? "",...(typeof node.title === "string" ? {title:node.title}:{})});
-    if(node.type === "inline") return wrapper("span",kids(),{"data-type":node.subType ?? "",...(node.ref !== undefined ? {"data-ref":node.ref}:{})});
+    if(node.type === "inline") return wrapper("span",kids(),{...(node.subType !== undefined ? {"data-type":node.subType}:{}),...(node.ref !== undefined ? {"data-ref":node.ref}:{})});
     if(node.type === "container" && !["details","figure"].includes(node.subType ?? "")) {
       const heading=node.title ? `<header>${typeof node.title === "object" ? native(node.title):escapeHtml(node.title)}</header>`:"";
-      return wrapper("section",`${heading}${(node.body ?? []).map(native).join("")}`,{"data-type":node.subType ?? ""});
+      return node.subType === undefined ? wrapper("div",`${heading}${(node.body ?? []).map(native).join("")}`) : wrapper("section",`${heading}${(node.body ?? []).map(native).join("")}`,{"data-type":node.subType});
     }
     if(node.type === "group") return wrapper(node.tag ?? (node.display === "inline" ? "span":"div"),(node.children ?? []).map(native).join(""));
     if(node.type === "blockquote") return wrapper("blockquote",(node.body ?? []).map(native).join(""));
@@ -293,6 +293,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return `${node.type === "imageReference" ? "!":""}[${text}]${form === "full" ? `[${label}]` : form === "collapsed" ? "[]":""}${attrs}`;
     }
     if(node.type === "inline") {
+      // A typeless inline is a bracketed span: its attribute list is its only marker.
+      if(node.subType === undefined) return `[${content(node,{label:true})}]${attrs || "{}"}`;
       if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Inline directives need a valid subtype.");
       if(node.subType === "mention") {
         // Markdown cannot spell a mention at a non-whitespace source boundary.
@@ -470,7 +472,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     }
     if(node.type === "list") return list(node);
     if(node.type === "container" || node.type === "leaf") {
-      if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
+      // Only a container may omit its type; a leaf directive names one.
+      if(!(node.type === "container" && node.subType === undefined) && !/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
       if(!forceTabsWrapper && spelling(node,"form") !== "explicit" && node.type === "container" && node.subType === "tabs" && !node.id && !node.title && !node.attributes && node.body?.every(child=>child.type === "container" && child.subType === "tab")) return blockArray(node.body);
       if(node.type === "container" && node.spelling === "alert") {
         if(node.id !== undefined || node.attributes || structuralTypes.has(node.subType!)) warn(options,"unsupported-alert","An alert has no attribute or structural-type spelling; it is written as a colon container.");
@@ -494,7 +497,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         return found ? {...found,...(node.type === "leaf" ? {}:{body:[]})} : undefined;
       },"header",node);
       const header=keep ? authored! : [node.subType,node.title !== undefined ? title(node):undefined,writeAttributes(node)].filter(Boolean).join(" ");
-      return node.type === "leaf" ? `${colons}${header}` : `${colons}${keep ? "":" "}${header}\n${blockArray(node.body ?? [])}\n${colons}`;
+      return node.type === "leaf" ? `${colons}${header}` : `${colons}${keep || !header ? "":" "}${header}\n${blockArray(node.body ?? [])}\n${colons}`;
     }
     if(node.type === "lineBlock") {
       if(node.id !== undefined || node.attributes) fail("Line-block attributes have no lossless core source mapping.");

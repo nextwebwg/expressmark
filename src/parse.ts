@@ -238,6 +238,31 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       return true;
     });
   }
+  // `[text]{attributes}` is a bracketed span when the bracket is no link. It
+  // runs after the link rule, so links and resolving references keep their
+  // lists; `![…]` stays image syntax and `[^…]` footnote syntax.
+  md.inline.ruler.after("link","bracketed_span",(state: StateInline,silent: boolean) => {
+    if(state.src[state.pos] !== "[" || state.src[state.pos+1] === "^") return false;
+    // A bracket after `!`, `@` or `:name` has the image, mention or inline-type
+    // shape; when that construct does not form, its source stays text.
+    const before=state.src.slice(0,state.pos);
+    if(/[!@]$|:[A-Za-z][A-Za-z0-9_-]*$/.test(before)) return false;
+    const label=readLabel(state.src.slice(state.pos)); if(!label) return false;
+    const attributesStart=state.pos+label.length;
+    let cursor=attributesStart;
+    const lists: NonNullable<ReturnType<typeof readAttributes>>[]=[];
+    while(state.src[cursor] === "{") { const attrs=readAttributes(state.src.slice(cursor),silent ? {}:options); if(!attrs) break; lists.push(attrs); cursor+=attrs.length; }
+    if(!lists.length) return false;
+    if(!silent) {
+      const node=compact({type:"inline"},inline(label.value));
+      for(const attrs of lists) attach(node,attrs);
+      const authored=state.src.slice(attributesStart,cursor);
+      if(authored !== writeAttributes(node)) spell(node,"attributes",authored);
+      state.push("expressive_inline","",0).meta={node};
+    }
+    state.pos=cursor;
+    return true;
+  });
   md.inline.ruler.before("link","footnote_reference",(state: StateInline,silent: boolean) => {
     if(state.src[state.pos] !== "[" || state.src[state.pos+1] !== "^") return false;
     const label=tokenHandle(state.src.slice(state.pos+2));
@@ -251,11 +276,16 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
-    const node=readHeader(opening[2]!,options,true); if(!node) return false;
+    // Every colon fence opens a container. A header that cannot be read gives
+    // a generic container keeping the raw header, so writing restores it.
     // The header keeps its spacing after the colons.
     const header=opening[2]!.trimEnd();
+    const parsed=readHeader(opening[2]!,silent ? {}:options,true);
+    const node: Node=parsed ?? {type:"container",body:[]};
     const label=typeof node.title === "object" ? node.title.value : undefined;
-    if(header !== " "+[node.subType,label === undefined ? undefined : node.titleSpelling === "unbracketed" ? label : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ")) spell(node,"header",header);
+    const parts=[node.subType,label === undefined ? undefined : node.titleSpelling === "unbracketed" ? label : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ");
+    if(!parsed || header !== (parts ? ` ${parts}`:"")) spell(node,"header",header);
+    if(!parsed && !silent) warn(options,"invalid-container-header",`The container header "${header.trim()}" could not be read; it is kept as written.`);
     spell(node,"fence",opening[1]!.length);
     if(silent) return true;
     const length=opening[1]!.length;
