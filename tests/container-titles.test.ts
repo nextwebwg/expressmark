@@ -23,7 +23,7 @@ describe("container title spellings", () => {
     expect(stringify(document)).toBe(source);
   });
   it("trims surrounding whitespace and reads attributes before the title", () => {
-    expect(parse("::: note {#n}   Spaced title   {tone=calm}\nBody.\n:::").body).toEqual([container("note",plain("Spaced title"),{id:"n",titleSpelling:"unbracketed",attributes:{tone:"calm"}})]);
+    expect(parse("::: note {#n}   Spaced title   {tone=calm}\nBody.\n:::").body).toEqual([container("note",plain("Spaced title"),{id:"n",titleSpelling:"unbracketed",attributes:{tone:"calm"},source:{header:" note {#n}   Spaced title   {tone=calm}"}})]);
   });
   it("keeps a bracketed title followed by words as ordinary text", () => {
     expect(parse("::: note [Title] extra\nBody.\n:::").body[0]?.type).toBe("paragraph");

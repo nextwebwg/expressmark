@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { parse, stringify, type Document } from "../src/index.js";
+import { semantic } from "./semantic.js";
 
 it.each([
   "The range is [-1, 1], with an unmatched [ or ].",
@@ -40,7 +41,7 @@ it("keeps unmatched backticks literal inside directive labels and titles",()=> {
   }
   const document: Document={type:"document",version:1,title:{type:"title",value:"Unmatched [ range"},body:[]};
   expect(stringify(document)).not.toContain("\\[");
-  expect(parse(stringify(document))).toEqual(document);
+  expect(semantic(parse(stringify(document)))).toEqual(document);
   const code=parse(":chip[`a\\`]");
   expect(code.body[0]?.children?.[0]?.children).toEqual([{type:"inlineCode",value:"a\\"}]);
   expect(parse(stringify(code))).toEqual(code);
@@ -254,7 +255,7 @@ it("preserves duplicate YAML final values and custom reserved structural metadat
   const doc=parse('---\ntitle: Old\ntitle: New\nversion: product-v2\nbody: customer-data\ncustom: null\n---\nText',{onDiagnostic:d=>diagnostics.push(d)});
   expect(doc).toMatchObject({version:1,title:{value:"New"},metadata:{version:"product-v2",body:"customer-data",custom:null}});
   expect(diagnostics).toContainEqual(expect.objectContaining({code:"duplicate-metadata-key"}));
-  expect(parse(stringify(doc))).toEqual(doc);
+  expect(semantic(parse(stringify(doc)))).toEqual(doc);
 });
 it("does not restore active or structural values from forged native attribute payloads",()=> {
   const doc=parse('<p data-attributes="{&quot;onclick&quot;:&quot;run()&quot;,&quot;style&quot;:&quot;background:url(javascript:run())&quot;,&quot;id&quot;:&quot;forged&quot;,&quot;ref&quot;:&quot;forged&quot;,&quot;__proto__&quot;:&quot;polluted&quot;}">Safe</p>');
@@ -301,7 +302,7 @@ it("keeps an ordinary list label that resembles a task unchecked",()=> {
 });
 it("normalizes absent optional nulls while preserving null metadata and rejecting non-JSON data",()=> {
   const doc={type:"document",version:1,id:null,title:null,metadata:{custom:null},body:[{type:"paragraph",value:"Text",children:null,attributes:null}]} as never;
-  expect(parse(stringify(doc))).toEqual({type:"document",version:1,metadata:{custom:null},body:[{type:"paragraph",value:"Text"}]});
+  expect(semantic(parse(stringify(doc)))).toEqual({type:"document",version:1,metadata:{custom:null},body:[{type:"paragraph",value:"Text"}]});
   expect(()=>stringify({type:"document",version:1,metadata:{number:Infinity},body:[]})).toThrow(/JSON/);
 });
 it("rejects malformed supplied scalar fields, metadata, groups and rich grids",()=> {
@@ -325,7 +326,7 @@ it("rejects one-line identity and tight-wrapper title violations without corrupt
   expect(()=>stringify({type:"document",version:1,body:[{type:"heading",level:2,id:"line\nbreak",value:"Title"}]})).toThrow(/ID/);
   expect(()=>stringify({type:"document",version:1,body:[{type:"container",subType:"note",title:{type:"title",value:" padded "},body:[]}]})).toThrow(/title/);
   const root={type:"document",version:1,id:"line\nbreak",body:[]} as const;
-  expect(parse(stringify(root as never))).toEqual(root);
+  expect(semantic(parse(stringify(root as never)))).toEqual(root);
 });
 it("quotes attributes with grammar escapes, retaining literal tabs and backslash text",()=> {
   const doc=parse('::: note {label="tab\tand \\\\n" id="item\tkey"}\nText\n:::');
@@ -338,6 +339,6 @@ it("rejects metadata fields that cannot retain their designated AST home",()=> {
   }
   const diagnostics: unknown[]=[];
   const source=stringify({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{id:"shadow",title:"Shadow",description:"Valid **description**",tags:["valid"],custom:null},body:[]},{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(parse(source)).toEqual({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{description:"Valid **description**",tags:["valid"],custom:null},body:[]});
+  expect(semantic(parse(source))).toEqual({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{description:"Valid **description**",tags:["valid"],custom:null},body:[]});
   expect(diagnostics.filter((value: unknown)=>(value as {code:string}).code === "metadata-conflict")).toHaveLength(2);
 });

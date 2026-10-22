@@ -33,8 +33,7 @@ it.each([
   const document = parse(source);
   expect(document.body[0]?.children?.[0]).toMatchObject({type:"inline",subType:"mention"});
   const output = stringify(document);
-  expect(output).toMatch(/^@\[/);
-  expect(output).not.toContain(":mention");
+  expect(output).toBe(`${source}\n`);
   expect(parse(output)).toEqual(document);
 });
 

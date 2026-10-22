@@ -1,7 +1,9 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
-import { alertMarker, diagnoseIds, normalizeLabel, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
+import { alertMarker, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
 import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { syntax } from "./escape.js";
+import { parse } from "./parse.js";
 import { footnoteDefinitions, linkDefinitions } from "./references.js";
 import { tableGrid, transposeTable } from "./tables.js";
 import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
@@ -13,11 +15,6 @@ function inlineCode(value: string): string {
   const fence="`".repeat(length);
   const padding=/^`|`$/.test(value) || (/^ | $/.test(value) && /[^ ]/.test(value)) ? " " : "";
   return `${fence}${padding}${value}${padding}${fence}`;
-}
-// Destinations keep backslashes and angle brackets literal, and use <…> when needed.
-function destination(value: string): string {
-  const url=value.replace(/\\/g,"\\\\").replace(/[<>\n]/g,c=>encodeURIComponent(c));
-  return !url || /[\s()\\]/u.test(url) ? `<${url}>`:url;
 }
 function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {}): string {
   const values: Record<string,string|boolean|number>={...node.attributes,...extra};
@@ -31,6 +28,16 @@ function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {})
   if(node.attributes && Object.keys(node.attributes).length) output.push(` data-attributes="${escapeHtml(JSON.stringify(safeAuthoredAttributes(node.attributes,{})))}"`);
   return output.join("");
 }
+// Node field contracts, shared by every validation call.
+const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
+const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"];
+const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
+const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition"]);
+const structural: Record<string,string[]> = {
+    document:["version","metadata"], footnoteReference:["label"], footnoteDefinition:["label"],
+    container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
+    link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
+};
 function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(!node || typeof node !== "object" || typeof node.type !== "string" || !node.type) fail(`${path} needs a nonempty node type.`);
   if(seen.has(node)) fail(`${path} contains a cyclic node reference.`);
@@ -46,19 +53,12 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
     for(const [i,child] of node[slot].entries()) validate(child,`${path}.${slot}[${i}]`,seen);
   }
   if(node.title !== undefined && node.title !== null && typeof node.title !== "string") validate(node.title,`${path}.title`,seen);
-  const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
   for(const key of Object.keys(node)) if(!known.has(key)) fail(`${path}.${key} has no Markdown mapping.`);
-  const structural: Record<string,string[]> = {
-    document:["version","metadata"], footnoteReference:["label"], footnoteDefinition:["label"],
-    container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
-    link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
-  };
   for(const key of ["ordered","tight","checked","header"] as const) if(node[key] !== undefined && typeof node[key] !== "boolean") fail(`${path}.${key} must be a boolean.`);
   for(const key of ["url","alt","language","meta","ref","subType"] as const) if(node[key] !== undefined && typeof node[key] !== "string") fail(`${path}.${key} must be a string.`);
   for(const key of ["level","start","colSpan","rowSpan"] as const) if(node[key] !== undefined && (!Number.isInteger(node[key]) || node[key]! < (key === "start" ? 0:1))) fail(`${path}.${key} has an invalid integer value.`);
   if(node.align !== undefined && (!Array.isArray(node.align) || node.align.some(value=>value !== null && !["start","center","end"].includes(value)))) fail(`${path}.align needs column alignment values.`);
   if(node.type === "group" && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
-  const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"];
   for(const key of special) if(key in node && !structural[node.type]?.includes(key)) fail(`${path}.${key} is not defined for ${node.type}.`);
   if(node.subType !== undefined && !["container","inline","leaf"].includes(node.type)) fail(`${path}.subType is not defined for ${node.type}.`);
   if(node.titleSpelling !== undefined && !["bracketed","unbracketed"].includes(node.titleSpelling)) fail(`${path}.titleSpelling needs bracketed or unbracketed.`);
@@ -82,8 +82,6 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.title != null && !["document","container","table","code","link","image","leaf","definition"].includes(node.type)) fail(`${path} does not define a title.`);
   if(["code","link","image","definition"].includes(node.type) && node.title != null && typeof node.title !== "string") fail(`${path}.title must be a string.`);
   if(["document","container","table","leaf"].includes(node.type) && node.title != null && (typeof node.title !== "object" || node.title.type !== "title")) fail(`${path}.title must be a title node.`);
-  const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
-  const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition"]);
   const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "inline";
   const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "block";
   if(node.body?.some(child=>!isBlock(child))) fail(`${path}.body needs block nodes.`);
@@ -98,6 +96,8 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   seen.delete(node);
 }
 
+// Writing works on normalized copies; spellings are fingerprinted on the parsed originals.
+const originals=new WeakMap<Node,Node>();
 function normalizeAbsence(node: Node, seen=new Set<Node>()): Node {
   if(!node || typeof node !== "object") fail("Expected a document node.");
   if(seen.has(node)) fail("A document cannot contain cyclic content.");
@@ -106,7 +106,7 @@ function normalizeAbsence(node: Node, seen=new Set<Node>()): Node {
   for(const key of Object.keys(copy) as (keyof Node)[]) if(copy[key] === null) delete copy[key];
   for(const key of ["body","children"] as const) if(Array.isArray(copy[key])) copy[key]=copy[key].map(child=>normalizeAbsence(child,seen));
   if(typeof copy.title === "object" && copy.title !== null) copy.title=normalizeAbsence(copy.title,seen);
-  seen.delete(node);return copy;
+  seen.delete(node); originals.set(copy,node); return copy;
 }
 function validateMetadata(value: unknown, ancestors=new Set<unknown>()): void {
   if(value === null || typeof value === "string" || typeof value === "boolean") return;
@@ -133,6 +133,29 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(Object.hasOwn(metadata,"title") && document.title === undefined) fail("metadata.title has no independent source mapping; use the document title field.");
   }
   diagnoseIds(document,options);
+  // Authored spellings recorded in `source`. Each is written back only while
+  // it still reads as the node; otherwise the preferred spelling is written.
+  const spelling=(node: Node, key: string): string | undefined => typeof node.source?.[key] === "string" ? node.source[key] as string : undefined;
+  const reads=(markdown: string, node: Node, pick: (document: Document)=>Node | undefined = document=>document.body[0], key?: string, holder: Node = node): boolean => {
+    if(key && spellingHolds(originals.get(holder) ?? holder,holder,key)) return true;
+    try { const found=pick(parse(markdown,options.trustedHtml ? {trustedHtml:true}:{})); return found !== undefined && sameData(found,node); } catch { return false; }
+  };
+  function attributes(node: Node, extra: Attributes = {}): string {
+    const authored=spelling(node,"attributes");
+    if(authored) {
+      const probe: Node={type:node.type};
+      let rest=authored;
+      while(rest) { const attrs=readAttributes(rest); if(!attrs) break; if(attrs.id !== undefined) probe.id=attrs.id; if(Object.keys(attrs.attributes).length) probe.attributes={...probe.attributes,...attrs.attributes}; rest=rest.slice(attrs.length); }
+      if(!rest && probe.id === node.id && sameData(probe.attributes ?? {},{...node.attributes,...extra})) return authored;
+    }
+    return writeAttributes(node,extra);
+  }
+  function fence(node: Node): number {
+    let nested=0;
+    const visit=(child: Node)=>{ if(["container","table"].includes(child.type)) nested=Math.max(nested,fence(child)); else (child.body ?? child.children ?? []).forEach(visit); };
+    (node.body ?? node.children ?? []).forEach(visit);
+    return Math.max(typeof node.source?.fence === "number" ? node.source.fence:0,3,nested+1);
+  }
   const footnotes=new Set(footnoteDefinitions(document).keys());
   const definitions=linkDefinitions(document);
   const references=new Set(definitions.keys());
@@ -200,7 +223,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     return clean;
   }
   function inline(node: Node, previous?: Node, next?: Node, context: TextContext = {}): string {
-    const attrs=writeAttributes(node);
+    const attrs=attributes(node);
     if(["link","image"].includes(node.type) && !safeUrl(node.url ?? "",node.type === "image")) {
       warn(options,"unsafe-url","An unsafe link or image URL was removed.");
       return node.type === "image" ? escapeText(node.alt ?? "") : content(node);
@@ -212,21 +235,49 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       // Keep their exact boundaries with the existing semantic HTML mapping.
       if(attrs || node.children?.some(child=>marks.includes(child.type))
         || marks.includes(previous?.type ?? "") || marks.includes(next?.type ?? "")) return safeNative(node);
-      const value=content(node,{...context,mentionStart:false,marks:`${context.marks ?? ""}${node.type === "delete" ? "~":"*"}`});
+      // Underscores do not delimit inside a word, so they need word boundaries.
+      const underscore=node.type !== "delete" && spelling(node,"marker") === "_"
+        && !(previous?.type === "text" && /[\p{L}\p{N}_]$/u.test(previous.value ?? "")) && !(next?.type === "text" && /^[\p{L}\p{N}_]/u.test(next.value ?? ""));
+      const value=content(node,{...context,mentionStart:false,marks:`${context.marks ?? ""}${node.type === "delete" ? "~":underscore ? "_":"*"}`});
       if(!value || /^\s|\s$/u.test(value)
         || /^[\p{P}\p{S}]/u.test(value) && previous?.type === "text" && /[^\s\p{P}\p{S}]$/u.test(previous.value ?? "")
         || /[\p{P}\p{S}]$/u.test(value) && next?.type === "text" && /^[^\s\p{P}\p{S}]/u.test(next.value ?? "")) return safeNative(node);
-      const mark=node.type === "strong" ? "**" : node.type === "emphasis" ? "*":"~~";
+      const mark=node.type === "strong" ? underscore ? "__":"**" : node.type === "emphasis" ? underscore ? "_":"*":"~~";
       return `${mark}${value}${mark}`;
     }
     if(["underline","highlight","group"].includes(node.type)) return safeNative(node);
-    if(node.type === "inlineCode") return attrs ? safeNative(node) : inlineCode(node.value ?? "");
-    if(node.type === "break") { if(attrs) return safeNative(node); return "\\\n"; }
+    if(node.type === "inlineCode") {
+      if(attrs) return safeNative(node);
+      const ticks=spelling(node,"fence");
+      const value=node.value ?? "";
+      // A recorded run works while the code holds no run of the same length.
+      if(ticks && /^`+$/.test(ticks) && !Array.from(value.matchAll(/`+/g)).some(m=>m[0].length === ticks.length)) {
+        const padding=/^`|`$/.test(value) || (/^ | $/.test(value) && /[^ ]/.test(value)) ? " ":"";
+        return `${ticks}${padding}${value}${padding}${ticks}`;
+      }
+      return inlineCode(value);
+    }
+    if(node.type === "break") {
+      if(attrs) return safeNative(node);
+      const spaces=node.source?.spaces;
+      return typeof spaces === "number" && spaces >= 2 && next ? `${" ".repeat(spaces)}\n` : "\\\n";
+    }
     if(node.type === "softBreak") { if(attrs) fail("A soft break cannot carry authored attributes in Markdown."); return "\n"; }
     if(node.type === "link" || node.type === "image") {
+      const form=spelling(node,"form");
+      if(node.type === "link" && form && !attrs && node.title === undefined && node.value !== undefined) {
+        const text=node.value, url=node.url ?? "";
+        if(form === "angle" && (url === text || url === `mailto:${text}`) && !/[\s<>]/.test(text) && reads(`<${text}>`,{type:"paragraph",children:[node]},undefined,"form",node)) return `<${text}>`;
+        // A bare URL is written as text the reader links again by itself.
+        if(form === "bare" && syntax.linkify.match(text)?.[0]?.raw === text && reads(text,{type:"paragraph",children:[node]},undefined,"form",node)) return text;
+      }
       const tooltip=typeof node.title === "string" ? ` ${quoteAttribute(node.title)}` : "";
       const label=node.type === "image" ? escapeText(node.alt ?? "",{block:false,label:true}) : content(node,{label:true,protectAutolinks:false,mentionStart:false});
-      return `${node.type === "image" ? "!":""}[${label}](${destination(node.url ?? "")}${tooltip})${attrs}`;
+      const authored=spelling(node,"target");
+      const target=authored && reads(`[x]${authored}`,{type:node.type,url:node.url ?? "",...(node.title !== undefined ? {title:node.title}:{})},document=>{
+        const found=document.body[0]?.children?.[0]; return found ? {type:node.type,url:found.url,...(found.title !== undefined ? {title:found.title}:{})} as Node : undefined;
+      },"target",node) ? authored : `(${destination(node.url ?? "")}${tooltip})`;
+      return `${node.type === "image" ? "!":""}[${label}]${target}${attrs}`;
     }
     if(node.type === "linkReference" || node.type === "imageReference") {
       const text=node.type === "imageReference" ? escapeText(node.alt ?? "",{block:false,label:true}) : content(node,{label:true,protectAutolinks:false,mentionStart:false});
@@ -250,8 +301,11 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         if(!startsMention({...context,...(previous ? {previous}:{})})) return safeNative(node);
         const ref=node.ref;
         const suffix=ref !== undefined && tokenHandle(ref) === ref ? `#${ref}`:"";
+        const following=next?.type === "text" ? next.value ?? "" : "";
+        if(spelling(node,"form") === "bare" && node.value !== undefined && tokenHandle(node.value) === node.value && !writeAttributes(node,ref !== undefined && !suffix ? {ref}:{})
+          && !(suffix ? /^[{]/ : /^[\p{L}\p{M}\p{N}_#{-]/u).test(following)) return `@${node.value}${suffix}`;
         const extra: Attributes=ref !== undefined && !suffix ? {ref}:{};
-        return `@[${content(node,{label:true})}]${suffix}${writeAttributes(node,extra)}`;
+        return `@[${content(node,{label:true})}]${suffix}${attributes(node,extra)}`;
       }
       return `:${node.subType}${node.value !== undefined || node.children ? `[${content(node,{label:true})}]`:""}${attrs}`;
     }
@@ -273,18 +327,35 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const { text: kept, lists }=trailingAttributeLists(opened);
     return lists.length ? `${kept}${opened.slice(kept.length).replace(/([ \t])\{/g,"$1\\{")}` : opened;
   }
-  function depth(node: Node): number {
-    return (["container","table"].includes(node.type) ? 1:0)+Math.max(0,...(node.body ?? node.children ?? []).map(depth));
+  // GFM pipe form: one header row, inline cells and no merges, captions or attributes.
+  function pipeTable(node: Node, grid: Node[][]): string | undefined {
+    if(!grid.length || node.title !== undefined || node.attributes || node.id !== undefined) return;
+    if(!grid[0]!.every(cell=>cell.header) || grid.slice(1).some(row=>row.some(cell=>cell.header))) return;
+    const cells=new Set<Node>();
+    for(const row of grid) for(const cell of row) { if(cells.has(cell) || cell.body || cell.colSpan || cell.rowSpan) return; cells.add(cell); }
+    const write=(cell: Node)=> {
+      if(JSON.stringify(cell).includes("inlineCode") && JSON.stringify(cell).includes("|")) return;
+      const value=content(cell).replace(/\|/g,"\\|");
+      return value.includes("\n") ? undefined : /^[>^]$/.test(value) ? `\\${value}`:value;
+    };
+    const rows=grid.map(row=>row.map(write));
+    if(rows.some(row=>row.some(value=>value === undefined))) return;
+    const align=grid[0]!.map((_cell,index)=>({start:":---",center:":---:",end:"---:"} as Record<string,string>)[node.align?.[index] ?? ""] ?? "---");
+    return [rows[0]!,align,...rows.slice(1)].map(row=>`| ${row.join(" | ")} |`).join("\n");
   }
   function list(node: Node): string {
     if(typeof node.ordered !== "boolean" || !Array.isArray(node.children) || node.children.some(item=>item.type !== "listItem")) fail("Lists need ordered and listItem children.");
     if(node.id !== undefined || node.attributes) return safeNative(node);
     const start=node.start ?? 1;
     if(!Number.isInteger(start) || start<0) fail("List start must be a nonnegative integer.");
+    const marker=spelling(node,"marker");
+    const bullet=!node.ordered && (marker === "*" || marker === "+") ? marker:"-";
+    const delimiter=node.ordered && marker === ")" ? ")":".";
+    const same=node.ordered && spelling(node,"numbering") === "same";
     return node.children.map((item,index)=> {
       if(item.id !== undefined || item.attributes) fail("List-item attributes need a native list wrapper.");
-      const prefix=node.ordered ? `${start+index}. `:"- ";
-      const task=item.checked === undefined ? "" : `[${item.checked ? "x":" "}] `;
+      const prefix=node.ordered ? `${same ? start:start+index}${delimiter} `:`${bullet} `;
+      const task=item.checked === undefined ? "" : `[${item.checked ? spelling(item,"marker") === "X" ? "X":"x":" "}] `;
       // Task markers are structural only at the start of a list item. A plain
       // paragraph or a heading can contain the same bracketed text unescaped.
       const text=blockArray(item.body ?? [],node.tight === true).replace(/^\[([ xX])\](?=[ \t])/u,"\\[$1]");
@@ -298,6 +369,12 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       || !grid.length && node.align !== undefined
       || ["header","transpose","align"].some(key=>Object.hasOwn(node.attributes ?? {},key));
     if(needsNative) return safeNative(node);
+    if(spelling(node,"form") === "pipe") {
+      const authored=spelling(node,"markdown");
+      if(authored && reads(authored,node,undefined,"markdown")) return authored;
+      const pipe=pipeTable(node,grid);
+      if(pipe) return pipe;
+    }
     const headerRow=(grid: Node[][])=>grid.length>0 && grid[0]!.every(cell=>cell.header === true) && grid.slice(1).every(row=>row.every(cell=>!cell.header));
     const hasHeaders=grid.some(row=>row.some(cell=>cell.header));
     let sourceGrid=grid;
@@ -311,7 +388,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const header=headerRow(sourceGrid);
     const noMerges=sourceGrid.every(row=>row.every(cell=>!cell.rowSpan && !cell.colSpan));
     const labels=sourceGrid[0]?.map(cell=>cell.value) ?? [];
-    const named=!transpose && header && sourceGrid.length>1 && noMerges
+    const named=!transpose && header && sourceGrid.length>1 && noMerges && spelling(node,"form") !== "positional"
       && labels.every(value=>typeof value === "string" && Boolean(value.trim()) && !/[\r\n]/.test(value) && value.trim() === value)
       && new Set(labels).size === labels.length;
     const settings: Attributes={};
@@ -342,10 +419,9 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         return cellSource(cell);
       }).map((value,index)=>`${index === 0 ? "- -":"  -"}${value ? ` ${value.replace(/\n/g,"\n    ")}`:""}`).join("\n")).join("\n\n");
     }
-    const fence=":".repeat(2+depth(node));
-    const attributes=writeAttributes(node,settings);
-    const heading=["table",node.title !== undefined ? `[${caption(node)}]`:undefined,attributes].filter(Boolean).join(" ");
-    return `${fence} ${heading}\n\n${body}${body ? "\n\n":""}${fence}`;
+    const colons=":".repeat(fence(node));
+    const heading=["table",node.title !== undefined ? `[${caption(node)}]`:undefined,writeAttributes(node,settings)].filter(Boolean).join(" ");
+    return `${colons} ${heading}\n\n${body}${body ? "\n\n":""}${colons}`;
   }
   function block(node: Node, forceTabsWrapper = false): string {
     if(node.type === "paragraph") {
@@ -354,20 +430,38 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     }
     if(node.type === "heading") {
       if(!Number.isInteger(node.level)||node.level!<1||node.level!>6) fail("Heading level must be 1 through 6.");
-      return `${"#".repeat(node.level!)} ${content(node)}${writeAttributes(node) ? ` ${writeAttributes(node)}`:""}`;
+      const text=`${content(node)}${attributes(node) ? ` ${attributes(node)}`:""}`;
+      const underline=spelling(node,"underline");
+      if(spelling(node,"form") === "setext" && node.level! <= 2 && text.trim() && !text.includes("\n")) {
+        const char=node.level === 1 ? "=":"-";
+        return `${text}\n${underline && new RegExp(`^\\${char}+$`).test(underline) ? underline:char.repeat(3)}`;
+      }
+      const closing=spelling(node,"closing");
+      return `${"#".repeat(node.level!)} ${text}${closing && /^#+$/.test(closing) ? ` ${closing}`:""}`;
     }
     if(node.type === "code") {
       if(node.language && /[\s{}\n]/.test(node.language)) fail("Code language cannot contain whitespace or attribute delimiters.");
       if(typeof node.title === "object") fail("Code title must be literal text.");
       if(typeof node.title === "string" && /[\r\n]/.test(node.title) || node.meta && /[\r\n]/.test(node.meta)) fail("Code captions and metadata must fit on one source line.");
       const value=node.value ?? "";
-      const marker=[node.language,node.meta].some(value=>value?.includes("`")) ? "~":"`";
-      const fence=marker.repeat(Math.max(3,...Array.from(value.matchAll(new RegExp(`${marker}+`,"g")),m=>m[0].length+1)));
+      // Indented code holds no info and no surrounding blank lines.
+      if(spelling(node,"form") === "indented" && !node.language && !node.meta && node.title === undefined && node.id === undefined && !node.attributes
+        && value.trim() && !/^[ \t]*\n|\n[ \t]*$/.test(value) && !/^[ \t]*$/.test(value.split("\n")[0]!)) return value.split("\n").map(line=>line ? `    ${line}`:"").join("\n");
+      const recorded=spelling(node,"fence");
+      const marker=recorded?.[0] === "~" || [node.language,node.meta].some(value=>value?.includes("`")) ? "~":"`";
+      const needed=Math.max(3,...Array.from(value.matchAll(new RegExp(`${marker}+`,"g")),m=>m[0].length+1));
+      const fence=marker.repeat(recorded && /^(`+|~+)$/.test(recorded) && recorded[0] === marker ? Math.max(recorded.length,needed):needed);
       const attrs=writeAttributes(node,typeof node.title === "string" ? {title:node.title}:{});
-      const info=[node.language,attrs,node.meta].filter(Boolean).join(" ");
+      const authored=spelling(node,"info");
+      const probe=authored && !authored.includes("\n") && !(marker === "`" && authored.includes("`")) ? {...readInfo(authored),value:node.value} as Node : undefined;
+      const info=probe && sameData(probe,node) ? authored! : [node.language,attrs,node.meta].filter(Boolean).join(" ");
       return `${fence}${info}\n${value}\n${fence}`;
     }
-    if(node.type === "horizontalRule") return node.id !== undefined || node.attributes ? safeNative(node):"---";
+    if(node.type === "horizontalRule") {
+      if(node.id !== undefined || node.attributes) return safeNative(node);
+      const marker=spelling(node,"marker");
+      return marker && /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(marker) && marker.trimEnd() === marker ? marker:"---";
+    }
     if(node.type === "blockquote") {
       if(node.id !== undefined || node.attributes) return safeNative(node);
       // Literal text that would open an alert stays a quotation.
@@ -377,7 +471,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "list") return list(node);
     if(node.type === "container" || node.type === "leaf") {
       if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
-      if(!forceTabsWrapper && node.type === "container" && node.subType === "tabs" && !node.id && !node.title && !node.attributes && node.body?.every(child=>child.type === "container" && child.subType === "tab")) return blockArray(node.body);
+      if(!forceTabsWrapper && spelling(node,"form") !== "explicit" && node.type === "container" && node.subType === "tabs" && !node.id && !node.title && !node.attributes && node.body?.every(child=>child.type === "container" && child.subType === "tab")) return blockArray(node.body);
       if(node.type === "container" && node.spelling === "alert") {
         if(node.id !== undefined || node.attributes || structuralTypes.has(node.subType!)) warn(options,"unsupported-alert","An alert has no attribute or structural-type spelling; it is written as a colon container.");
         else {
@@ -389,12 +483,22 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
           return lines.map(line=>line ? `> ${line}`:">").join("\n");
         }
       }
-      const fence=":".repeat(node.type === "leaf" ? 2:2+depth(node));
-      const header=[node.subType,node.title !== undefined ? title(node):undefined,writeAttributes(node)].filter(Boolean).join(" ");
-      return node.type === "leaf" ? `${fence}${header}` : `${fence} ${header}\n${blockArray(node.body ?? [])}\n${fence}`;
+      const colons=":".repeat(node.type === "leaf" ? 2:fence(node));
+      // A recorded header is kept while it still names the same type, title and attributes.
+      const authored=spelling(node,"header");
+      const keep=authored !== undefined && !authored.includes("\n") && reads(node.type === "leaf" ? `::${authored}` : `:::${authored}\n:::`,node.type === "leaf" ? node:{...node,body:[]},parsed=>{
+        // A lone tab reads back inside its implicit group.
+        const first=parsed.body[0];
+        const found=node.subType === "tab" && first?.subType === "tabs" ? first.body?.[0] : first;
+        return found ? {...found,...(node.type === "leaf" ? {}:{body:[]})} : undefined;
+      },"header",node);
+      const header=keep ? authored! : [node.subType,node.title !== undefined ? title(node):undefined,writeAttributes(node)].filter(Boolean).join(" ");
+      return node.type === "leaf" ? `${colons}${header}` : `${colons}${keep ? "":" "}${header}\n${blockArray(node.body ?? [])}\n${colons}`;
     }
     if(node.type === "lineBlock") {
       if(node.id !== undefined || node.attributes) fail("Line-block attributes have no lossless core source mapping.");
+      const authored=spelling(node,"markdown");
+      if(authored && reads(authored,node,undefined,"markdown")) return authored;
       const text=content(node).replace(/\\\n/g,"\n");
       return text.split("\n").map(line=>line ? `| ${line}`:"|").join("\n");
     }
@@ -402,6 +506,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "definition") {
       let url=node.url ?? "";
       if(!safeUrl(url)) { warn(options,"unsafe-url","An unsafe reference definition URL was removed."); url=""; }
+      const authored=spelling(node,"markdown");
+      if(authored && url === node.url && reads(authored,node,undefined,"markdown")) return authored;
       return `[${node.label}]: ${destination(url)}${typeof node.title === "string" ? ` ${quoteAttribute(node.title)}`:""}`;
     }
     if(node.type === "footnoteDefinition") {
@@ -436,9 +542,9 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     metadata.title=caption({type:"document",title:document.title});
   }
   if(document.attributes && Object.keys(document.attributes).length) fail("Root attributes have no core frontmatter mapping.");
-  const head=Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";
-  // Notes follow the body in list order. A note's first block shares the marker
-  // line; every later line is indented four columns, as a list item's would be.
+  const authoredYaml=spelling(document,"frontmatter");
+  const keepYaml=authoredYaml !== undefined && reads(`---\n${authoredYaml}\n---\n`,{type:"document",body:[],...(document.id !== undefined ? {id:document.id}:{}),...(document.title !== undefined ? {title:document.title}:{}),...(document.metadata ? {metadata:document.metadata}:{})} as Node,parsed=>({...parsed,version:undefined,body:[]} as unknown as Node),"frontmatter",document);
+  const head=keepYaml ? `---\n${authoredYaml}\n---\n\n` : Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";
   const body=blockArray(document.body);
   return `${head}${body}${head || body ? "\n":""}`;
 }

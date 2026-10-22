@@ -179,3 +179,65 @@ export function diagnoseIds(node: Node, options: ConversionOptions, seen=new Set
   if(typeof node.title === "object" && node.title !== null) diagnoseIds(node.title,options,seen);
   for(const child of node.body ?? node.children ?? []) diagnoseIds(child,options,seen);
 }
+
+/** Read a code fence's info string into its language, caption, attributes and meta. */
+export function readInfo(source: string, options: ConversionOptions = {}): Node {
+  const node: Node = {type:"code"};
+  let info = source.trim();
+  const language = /^[^\s{]+/.exec(info);
+  if (language) { node.language = language[0]; info = info.slice(language[0].length).trimStart(); }
+  let rest = "";
+  while (info) {
+    const attrs = readAttributes(info, options);
+    if (attrs) { attach(node, attrs); info = info.slice(attrs.length).trimStart(); }
+    else { const match = /^[^\s]+/.exec(info)!; rest += `${rest ? " " : ""}${match[0]}`; info = info.slice(match[0].length).trimStart(); }
+  }
+  if (rest) node.meta = rest;
+  if (typeof node.attributes?.title === "string") { node.title = node.attributes.title; delete node.attributes.title; }
+  if (node.attributes && !Object.keys(node.attributes).length) delete node.attributes;
+  return node;
+}
+
+/** A link destination: backslashes and angle brackets stay literal; `<…>` when needed. */
+export function destination(value: string): string {
+  const url = value.replace(/\\/g, "\\\\").replace(/[<>\n]/g, c => encodeURIComponent(c));
+  return !url || /[\s()\\]/u.test(url) ? `<${url}>` : url;
+}
+
+// Spellings live in `source`; they never decide whether two nodes mean the same.
+function semanticJson(value: unknown): string {
+  return JSON.stringify(value, (key, item: unknown) => key === "source" || key === "position" ? undefined
+    : item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : 1)) : item);
+}
+/** Whether two nodes hold the same document data, apart from source spelling. */
+export function sameData(a: unknown, b: unknown): boolean { return semanticJson(a) === semanticJson(b); }
+
+// Fields each free-form raw spelling encodes. While those fields and the raw
+// text match their parse-time fingerprint, the writer reuses the raw text
+// without reading it again; edited or deserialized nodes are re-read instead.
+export const spelledFields: Readonly<Record<string, readonly string[] | undefined>> = {
+  header: ["type","subType","id","attributes","title","titleSpelling"],
+  attributes: ["id","attributes"],
+  info: ["language","title","attributes","meta","id"],
+  target: ["url","title"],
+  frontmatter: ["id","title","metadata"],
+  form: ["type","url","value","children","title","attributes"],
+  markdown: undefined,
+};
+const fingerprints = new WeakMap<object, Map<string, string>>();
+function fingerprint(node: Node, key: string): string {
+  const fields = spelledFields[key];
+  const picked = fields ? Object.fromEntries(fields.map(field => [field, (node as unknown as Record<string, unknown>)[field]])) : node;
+  return semanticJson([node.source?.[key], picked]);
+}
+/** Remember the raw spellings one parsed node records. */
+export function rememberSpellings(node: Node): void {
+  if (node.source) for (const key of Object.keys(node.source)) if (key in spelledFields) {
+    let map = fingerprints.get(node); if (!map) fingerprints.set(node, map = new Map());
+    map.set(key, fingerprint(node, key));
+  }
+}
+/** Whether `node` still matches the raw spelling its parsed `original` recorded. */
+export function spellingHolds(original: Node, node: Node, key: string): boolean {
+  return fingerprints.get(original)?.get(key) === fingerprint(node, key);
+}

@@ -2,7 +2,7 @@ import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markd
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { alertMarker, attach, compact, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import type { ConversionOptions, Document, Json, Node } from "./types.js";
@@ -33,7 +33,18 @@ function clearAutomatic(node: Node): void {
   for (const child of node.body ?? node.children ?? []) clearAutomatic(child);
 }
 
+// Record an authored spelling in source provenance; the preferred spelling is never recorded.
+let spelled=false;
+function spell(node: Node, key: string, value: string | number): void {
+  node.source={...node.source,[key]:value}; spelled=true;
+}
+// The fence the writer chooses for code without a recorded spelling.
+function codeFence(node: Node): string {
+  const marker=[node.language,node.meta].some(value=>value?.includes("`")) ? "~":"`";
+  return marker.repeat(Math.max(3,...Array.from((node.value ?? "").matchAll(new RegExp(`${marker}+`,"g")),m=>m[0].length+1)));
+}
 export function parse(markdown: string, options: ConversionOptions = {}): Document {
+  spelled=false;
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
@@ -82,6 +93,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     let subtype: string;
     let label: string | undefined;
     let ref: string | undefined;
+    let bare=false;
     if(marker === "@") {
       if (!mentionBoundary(state.src,start)) return false;
       subtype="mention";
@@ -90,7 +102,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         label=found.value; cursor+=found.length;
       } else {
         const found=tokenHandle(state.src.slice(cursor)); if(!found) return false;
-        label=found; cursor+=found.length;
+        label=found; cursor+=found.length; bare=true;
       }
       if(state.src[cursor] === "#") {
         ref=tokenHandle(state.src.slice(cursor+1)); if(ref) cursor+=ref.length+1;
@@ -108,6 +120,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const node: Node={type:"inline",subType:subtype};
     if(ref !== undefined) node.ref=ref;
     let attached=false;
+    const attributesStart=cursor;
     while(state.src[cursor] === "{") {
       const attrs=readAttributes(state.src.slice(cursor),options); if(!attrs) break;
       attach(node,attrs); cursor+=attrs.length; attached=true;
@@ -116,6 +129,11 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(silent) return true;
     if(label !== undefined) compact(node,inline(label));
     promote(node);
+    if(bare) spell(node,"form","bare");
+    const authored=state.src.slice(attributesStart,cursor);
+    // A mention writes a non-handle reference as a ref attribute.
+    const canonical=writeAttributes(node,subtype === "mention" && node.ref !== undefined && tokenHandle(node.ref) !== node.ref ? {ref:node.ref}:{});
+    if(authored && authored !== canonical) spell(node,"attributes",authored);
     const token=state.push("expressive_inline","",0); token.meta={node};
     state.pos=cursor;
     return true;
@@ -128,6 +146,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(silent) return true;
     const existing=(last.meta ?? {}) as {attributes?: ReturnType<typeof readAttributes>[]};
     existing.attributes=[...(existing.attributes ?? []),attrs]; last.meta=existing;
+    (last.meta as {attributesSource?: string}).attributesSource=`${(last.meta as {attributesSource?: string}).attributesSource ?? ""}${state.src.slice(state.pos,state.pos+attrs.length)}`;
     state.pos+=attrs.length;
     return true;
   });
@@ -182,10 +201,21 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(!(key in outer)) outer[key]=value;
     // markdown-it's own token keeps only the normalized label; record the authored one.
     const raw=/^\[((?:\\[\s\S]|[^\\[\]])*)\]:/.exec(state.getLines(start,state.line,state.blkIndent,false).trimStart())!;
-    state.tokens.at(-1)!.meta={label:raw[1],url:value.href,title:value.title};
+    state.tokens.at(-1)!.meta={label:raw[1],url:value.href,title:value.title,markdown:state.getLines(start,state.line,state.blkIndent,false).trim()};
     return true;
   });
   md.core.ruler.disable("strip_references");
+  const newlineRule=original<(state: StateInline,silent: boolean)=>boolean>(md.inline.ruler,"newline");
+  md.inline.ruler.at("newline",(state,silent) => {
+    // Trailing spaces spell a hard break as well as a backslash does.
+    let spaces=0;
+    if(state.src[state.pos] === "\n") while(state.pending[state.pending.length-1-spaces] === " ") spaces++;
+    const count=state.tokens.length;
+    if(!newlineRule(state,silent)) return false;
+    const token=state.tokens.slice(count).find(candidate=>candidate.type === "hardbreak");
+    if(token && spaces >= 2) token.meta={spaces};
+    return true;
+  });
   for(const [name,offset] of [["link",0],["image",1]] as const) {
     const rule=original<(state: StateInline,silent: boolean)=>boolean>(md.inline.ruler,name);
     md.inline.ruler.at(name,(state,silent) => {
@@ -196,7 +226,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       const labelEnd=state.md.helpers.parseLinkLabel(state,start+offset,name === "link");
       const text=state.src.slice(start+offset+1,labelEnd);
       const rest=state.src.slice(labelEnd+1,state.pos);
-      if(!rest.startsWith("(")) {
+      if(rest.startsWith("(")) {
+        const token=state.tokens.slice(count).find(candidate=>candidate.type === (name === "link" ? "link_open":"image"))!;
+        token.meta={...token.meta,target:rest};
+      } else {
         const full=/^\[([\s\S]+)\]$/.exec(rest);
         // Pending text is flushed first, so find the token this rule opened.
         const token=state.tokens.slice(count).find(candidate=>candidate.type === (name === "link" ? "link_open":"image"))!;
@@ -219,6 +252,11 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
     const node=readHeader(opening[2]!,options,true); if(!node) return false;
+    // The header keeps its spacing after the colons.
+    const header=opening[2]!.trimEnd();
+    const label=typeof node.title === "object" ? node.title.value : undefined;
+    if(header !== " "+[node.subType,label === undefined ? undefined : node.titleSpelling === "unbracketed" ? label : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ")) spell(node,"header",header);
+    spell(node,"fence",opening[1]!.length);
     if(silent) return true;
     const length=opening[1]!.length;
     let close=start+1;
@@ -270,6 +308,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const node=readHeader(match[1]!,options); if(!node) return false;
     if(silent) return true;
     node.type="leaf"; delete node.body;
+    const header=match[1]!.trimEnd();
+    const label=typeof node.title === "object" ? node.title.value : undefined;
+    if(header !== [node.subType,label === undefined ? undefined : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ")) spell(node,"header",header);
     state.push("expressive_leaf","",0).meta={node};
     state.line=start+1; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
@@ -295,9 +336,17 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     const token=state.push("expressive_line_block","",0);
     token.content=lines.join("\n");
+    const authored=state.getLines(start,cursor,state.blkIndent,false).trimEnd();
+    if(authored !== lines.map(value=>value ? `| ${value}`:"|").join("\n")) token.meta={markdown:authored};
     state.line=cursor; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
 
+  function spellTarget(node: Node, target: unknown): void {
+    if(typeof target === "string" && target !== `(${destination(node.url ?? "")}${typeof node.title === "string" ? ` ${quoteAttribute(node.title)}`:""})`) spell(node,"target",target);
+  }
+  function spellAttributes(node: Node, authored: unknown): void {
+    if(typeof authored === "string" && authored !== writeAttributes(node)) spell(node,"attributes",authored);
+  }
   function inlineTokens(tokens: Token[], lineBlock = false): Node[] {
     let cursor=0;
     function read(until?:string): Node[] {
@@ -308,8 +357,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         if(token.type === "text") nodes.push({type:"text",value:token.content});
         else if(token.type === "expressive_inline") nodes.push(token.meta!.node as Node);
         else if(token.type === "footnote_ref") nodes.push({type:"footnoteReference",label:token.meta!.label as string});
-        else if(token.type === "softbreak" || token.type === "hardbreak") nodes.push({type:token.type === "hardbreak" || lineBlock ? "break":"softBreak"});
-        else if(token.type === "code_inline") nodes.push({type:"inlineCode",value:token.content});
+        else if(token.type === "softbreak" || token.type === "hardbreak") {
+          const node: Node={type:token.type === "hardbreak" || lineBlock ? "break":"softBreak"};
+          if(token.meta?.spaces) spell(node,"spaces",token.meta.spaces as number);
+          nodes.push(node);
+        } else if(token.type === "code_inline") {
+          const node: Node={type:"inlineCode",value:token.content};
+          if(token.markup.length !== Math.max(0,...Array.from(token.content.matchAll(/`+/g),m=>m[0].length))+1) spell(node,"fence",token.markup);
+          nodes.push(node);
+        }
         else if(token.type === "image") {
           const alt=token.children ? token.children.map(t=>t.content).join("") : token.content;
           const reference=token.meta?.reference as Pick<Node,"label"|"referenceType"> | undefined;
@@ -317,16 +373,21 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const node: Node=reference ? {type:"imageReference",...reference,alt} : {type:"image",url:String(token.attrGet("src") ?? ""),alt};
           const tooltip=token.attrGet("title"); if(tooltip !== null && !reference) node.title=String(tooltip);
           for(const attrs of ((token.meta?.attributes ?? []) as NonNullable<ReturnType<typeof readAttributes>>[])) attach(node,attrs);
+          spellTarget(node,token.meta?.target); spellAttributes(node,token.meta?.attributesSource);
           nodes.push(node);
         } else if(token.type === "link_open") {
           const reference=token.meta?.reference as Pick<Node,"label"|"referenceType"> | undefined;
           const node=compact(reference ? {type:"linkReference",...reference} : {type:"link",url:String(token.attrGet("href") ?? "")},read("link_close"));
           const tooltip=token.attrGet("title"); if(tooltip !== null && !reference) node.title=String(tooltip);
           for(const attrs of ((tokens[cursor-1]?.meta?.attributes ?? []) as NonNullable<ReturnType<typeof readAttributes>>[])) attach(node,attrs);
+          if(token.markup === "autolink" || token.markup === "linkify") spell(node,"form",token.markup === "autolink" ? "angle":"bare");
+          spellTarget(node,token.meta?.target); spellAttributes(node,tokens[cursor-1]?.meta?.attributesSource);
           nodes.push(node);
         } else if(["em_open","strong_open","s_open"].includes(token.type)) {
           const type=token.type === "em_open" ? "emphasis" : token.type === "s_open" ? "delete":"strong";
-          nodes.push(compact({type},read(token.type.replace("_open","_close"))));
+          const node=compact({type},read(token.type.replace("_open","_close")));
+          if(token.markup.startsWith("_")) spell(node,"marker","_");
+          nodes.push(node);
         } else if(token.type === "html_inline" && options.trustedHtml) nodes.push({type:"html",display:"inline",value:token.content});
         else if(token.type === "html_inline") {
           const open=/^<([a-z][\w:-]*)\b[^>]*>$/i.exec(token.content);
@@ -377,6 +438,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   }
   function blocks(tokens: Token[], original: string): Node[] {
     let cursor=0;
+    let sourceLines: string[] | undefined;
+    const lineAt=(index: number)=>(sourceLines ??= original.split("\n"))[index] ?? "";
     function read(until?:string): Node[] {
       const nodes: Node[]=[];
       while(cursor<tokens.length) {
@@ -386,6 +449,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const inner=tokens[cursor++]!;
           let content=inner.content;
           const attached: NonNullable<ReturnType<typeof readAttributes>>[]=[];
+          let attachedSource: string | undefined;
           if(token.type === "heading_open") {
             // Find a complete, whitespace-separated trailing attribute sequence.
             for(let i=0;i<content.length;i++) if(content[i] === "{" && /\s/.test(content[i-1] ?? "")) {
@@ -395,7 +459,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
                 candidates.push(attrs); position+=attrs.length;
                 position+=/^[ \t]*/.exec(content.slice(position))![0].length;
               }
-              if(position === content.length && candidates.length) { attached.push(...candidates); content=content.slice(0,i).trimEnd(); break; }
+              if(position === content.length && candidates.length) { attached.push(...candidates); attachedSource=content.slice(i).trimEnd(); content=content.slice(0,i).trimEnd(); break; }
             }
           }
           // The block pass already parsed inline content. Reparse only when
@@ -403,6 +467,16 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const children=content === inner.content && inner.children ? inlineTokens(inner.children):inline(content);
           const node=compact(token.type === "paragraph_open" ? {type:"paragraph"} : {type:"heading",level:Number(token.tag.slice(1))},children);
           for(const attrs of attached) attach(node,attrs);
+          spellAttributes(node,attachedSource);
+          if(token.type === "heading_open" && token.map) {
+            if(token.markup === "=" || token.markup === "-") {
+              spell(node,"form","setext");
+              spell(node,"underline",/[=-]+[ \t]*$/.exec(lineAt(token.map[1]-1))![0].trim());
+            } else {
+              const closing=/[ \t](#+)[ \t]*$/.exec(lineAt(token.map[0]));
+              if(closing) spell(node,"closing",closing[1]!);
+            }
+          }
           if(token.type === "paragraph_open") { const task=/^\[([ xX])\][ \t]+/.exec(content); if(task) tasks.set(node,task); }
           cursor++; nodes.push(node);
         } else if(token.type === "blockquote_open") {
@@ -424,7 +498,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const node: Node={type:"list",ordered:token.type === "ordered_list_open",tight:true,children:read(token.type.replace("_open","_close"))};
           const start=token.attrGet("start"); if(start !== null && Number(start) !== 1) node.start=Number(start);
           // Only direct item paragraphs determine this list's tightness.
-          node.tight=!tokens.slice(listStart,cursor).some(t=>t.type === "paragraph_open" && t.level === token.level+2 && !t.hidden);
+          let loose=false, items=0, same=true;
+          for(let index=listStart;index<cursor;index++) {
+            const item=tokens[index]!;
+            if(item.type === "paragraph_open" && item.level === token.level+2 && !item.hidden) loose=true;
+            if(item.type === "list_item_open" && item.level === token.level+1 && items++ && item.info !== tokens[listStart]!.info) same=false;
+          }
+          node.tight=!loose;
+          if(token.markup !== (node.ordered ? ".":"-")) spell(node,"marker",token.markup);
+          if(node.ordered && items>1 && same) spell(node,"numbering","same");
           nodes.push(node);
         } else if(token.type === "list_item_open") {
           const body=read("list_item_close");
@@ -433,29 +515,33 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(first?.type === "paragraph") {
             const text=first.value ?? (first.children?.[0]?.type === "text" ? first.children[0].value : undefined);
             const task=tasks.get(first);
-            if(task) { node.checked=task[1]!.toLowerCase() === "x"; if(first.value !== undefined) first.value=first.value.slice(task[0].length); else first.children![0]!.value=text!.slice(task[0].length); }
+            if(task) { node.checked=task[1]!.toLowerCase() === "x"; if(task[1] === "X") spell(node,"marker","X"); if(first.value !== undefined) first.value=first.value.slice(task[0].length); else first.children![0]!.value=text!.slice(task[0].length); }
           }
           nodes.push(node);
         } else if(token.type === "fence" || token.type === "code_block") {
           const node: Node={type:"code",value:""};
           // One parser-added terminal LF is removed; authored trailing blank lines remain.
           node.value=token.content.endsWith("\n") ? token.content.slice(0,-1) : token.content;
-          let info=token.info.trim();
-          const language=/^[^\s{]+/.exec(info);
-          if(language) { node.language=language[0]; info=info.slice(language[0].length).trimStart(); }
-          let rest="";
-          while(info) {
-            const attrs=readAttributes(info,options);
-            if(attrs) { attach(node,attrs); info=info.slice(attrs.length).trimStart(); }
-            else { const match=/^[^\s]+/.exec(info)!; rest+=`${rest ? " ":""}${match[0]}`; info=info.slice(match[0].length).trimStart(); }
+          Object.assign(node,readInfo(token.info,options),{type:"code"});
+          if(token.type === "code_block") spell(node,"form","indented");
+          else {
+            if(token.markup !== codeFence(node)) spell(node,"fence",token.markup);
+            const info=token.info.trim();
+            if(info !== [node.language,writeAttributes(node,typeof node.title === "string" ? {title:node.title}:{}),node.meta].filter(Boolean).join(" ")) spell(node,"info",info);
           }
-          if(rest) node.meta=rest;
-          promote(node); nodes.push(node);
-        } else if(token.type === "hr") nodes.push({type:"horizontalRule"});
+          nodes.push(node);
+        } else if(token.type === "hr") {
+          const node: Node={type:"horizontalRule"};
+          const marker=token.map ? /(?:[-*_][ \t]*){3,}$/.exec(lineAt(token.map[0]).trimEnd())?.[0] : undefined;
+          if(marker && marker !== "---") spell(node,"marker",marker);
+          nodes.push(node);
+        }
         else if(token.type === "html_block") nodes.push(...(options.trustedHtml ? [{type:"html",display:"block" as const,value:token.content.trimEnd()}] : htmlNodes(token.content.trimEnd(),"block",options)));
         else if(token.type === "expressive_container_open") {
           // Titles are read after the block pass so they can refer to any footnote.
-          const node=token.meta!.node as Node; title(node); node.body=read("expressive_container_close"); nodes.push(node);
+          const node=token.meta!.node as Node; title(node); node.body=read("expressive_container_close");
+          if(node.subType === "tabs" && node.id === undefined && !node.title && !node.attributes) spell(node,"form","explicit");
+          nodes.push(node);
         } else if(token.type === "expressive_table") {
           // Convert after the document block pass has collected link references.
           const meta=token.meta as {node:Node;body:string;source:string};
@@ -464,12 +550,18 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(typeof table === "string") {
             nodes.push({type:"literal",display:"block",value:sanitizeLiteral(meta.source,options)});
             warn(options,"invalid-table",table);
-          } else nodes.push(table);
+          } else {
+            if(typeof meta.node.source?.fence === "number") spell(table,"fence",meta.node.source.fence);
+            nodes.push(table);
+          }
         }
         else if(token.type === "expressive_leaf") { const node=token.meta!.node as Node; title(node); nodes.push(node); }
         else if(token.type === "reference_definition") {
-          const meta=token.meta as {label:string;url:string;title:string};
-          nodes.push({type:"definition",label:meta.label,url:meta.url,...(meta.title ? {title:meta.title}:{})});
+          const meta=token.meta as {label:string;url:string;title:string;markdown:string};
+          const node: Node={type:"definition",label:meta.label,url:meta.url,...(meta.title ? {title:meta.title}:{})};
+          const authored=meta.markdown;
+          if(authored && authored !== `[${node.label}]: ${destination(node.url!)}${node.title ? ` ${quoteAttribute(node.title as string)}`:""}`) spell(node,"markdown",authored);
+          nodes.push(node);
         }
         else if(token.type === "footnote_open") {
           // Definitions stay where they were written; the renderer collects them.
@@ -479,7 +571,11 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           nodes.push({type:"footnoteDefinition",label,body:read("footnote_close")});
         }
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
-        else if(token.type === "expressive_line_block") nodes.push(compact({type:"lineBlock"},inline(token.content,true)));
+        else if(token.type === "expressive_line_block") {
+          const node=compact({type:"lineBlock"},inline(token.content,true));
+          if(token.meta?.markdown) spell(node,"markdown",token.meta.markdown as string);
+          nodes.push(node);
+        }
         else if(token.type === "table_open") {
           const start=cursor-1;
           const rows: Node[]=[];
@@ -514,7 +610,14 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
             const value=range ? original.split("\n").slice(range[0],range[1]).join("\n") : rawCells.map(row=>`| ${row.join(" | ")} |`).join("\n");
             nodes.push({type:"literal",display:"block",value:sanitizeHtml(value,options)});
             warn(options,"invalid-table-merge",invalid);
-          } else nodes.push(table);
+          } else {
+            // Pipe source is a second table spelling; its padding is part of it.
+            spell(table,"form","pipe");
+            // Inside a quote the lines carry its markers; the canonical pipe form applies there.
+            const authored=token.map ? original.split("\n").slice(token.map[0],token.map[1]).join("\n").trim() : "";
+            if(authored && !/^[ \t]*>/m.test(authored)) spell(table,"markdown",authored);
+            nodes.push(table);
+          }
         }
       }
       return nodes;
@@ -526,6 +629,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   if(front) {
     const value=front[1]!;
     let valid=true;
+    let duplicateKeys=false;
     let metadata: unknown;
     try {
       const yaml=yamlDocument(value,{schema:"core",uniqueKeys:false});
@@ -537,7 +641,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const keys=new Set<string>();
           for(const pair of node.items) {
             if(!isScalar(pair.key) || typeof pair.key.value !== "string") throw new Error("Metadata keys must be strings.");
-            if(keys.has(pair.key.value)) warn(options,"duplicate-metadata-key",`Repeated YAML key ${pair.key.value}; the last value wins.`);
+            if(keys.has(pair.key.value)) { duplicateKeys=true; warn(options,"duplicate-metadata-key",`Repeated YAML key ${pair.key.value}; the last value wins.`); }
             keys.add(pair.key.value); inspect(pair.value);
           }
         } else if(isSeq(node)) for(const item of node.items) inspect(item);
@@ -563,6 +667,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(typeof map.id === "string") { document.id=map.id; delete map.id; }
       if(typeof map.title === "string") { documentTitle=map.title; delete map.title; }
       if(Object.keys(map).length) document.metadata=map;
+      // YAML spelling is free-form: keep the authored text unless it resolves a
+      // duplicate key. Writers regenerate YAML once the metadata changes.
+      if(!duplicateKeys) spell(document,"frontmatter",value);
     } catch(error) { valid=false; warn(options,"invalid-frontmatter",error instanceof Error ? error.message : "Unsupported YAML frontmatter."); }
     if(!valid) recoveredFrontmatter={type:"literal",display:"block",value:sanitizeHtml(front[0].trimEnd(),options)};
     source=source.slice(front[0].length);
@@ -576,6 +683,22 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   }
   if(recoveredFrontmatter) document.body.unshift(recoveredFrontmatter);
   clearAutomatic(document);
+  // A fence longer than the writer's own is a spelling; an equal one is not.
+  // Returns the length the writer gives a container, or its deepest nested one.
+  // The same walk fingerprints each recorded raw spelling.
+  const fences=(node: Node): number => {
+    if(typeof node.title === "object" && node.title !== null) fences(node.title);
+    let nested=0;
+    for(const child of node.body ?? node.children ?? []) nested=Math.max(nested,fences(child));
+    rememberSpellings(node);
+    if(!["container","table"].includes(node.type)) return nested;
+    const own=Math.max(3,nested+1);
+    const recorded=node.source?.fence;
+    if(typeof recorded !== "number") return own;
+    if(recorded <= own) { const {fence: _fence,...rest}=node.source!; if(Object.keys(rest).length) node.source=rest; else delete node.source; return own; }
+    return recorded;
+  };
+  if(spelled) fences(document);
   diagnoseIds(document,options);
   return document;
 }

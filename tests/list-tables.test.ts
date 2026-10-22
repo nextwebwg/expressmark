@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { semantic } from "./semantic.js";
 
 const p = (value: string): Node => ({type:"paragraph",value});
 const cell = (value: string, header = false): Node => ({type:"tableCell",value,...(header ? {header:true}:{})});
@@ -10,7 +11,7 @@ const source = (body: string, settings = ""): string => `::: table${settings ? `
 function check(markdown: string, expected: Node[]): Document {
   const diagnostics: Diagnostic[]=[];
   const document=parse(markdown,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(document).toEqual({type:"document",version:1,body:expected});
+  expect(semantic(document)).toEqual({type:"document",version:1,body:expected});
   const output=stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
   expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
   expect(diagnostics).toEqual([]);

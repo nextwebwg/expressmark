@@ -147,6 +147,11 @@ export function readListTable(container: Node, source: string, md: MarkdownIt, p
     }
     delete attributes.header; delete attributes.transpose; delete attributes.align;
     if(Object.keys(attributes).length) result.attributes=attributes;
+    // Positional rows with a header row are a second spelling of named fields.
+    // Recorded only where named fields could spell the table instead.
+    const labels=rows[0]?.children?.map(cell=>cell.value) ?? [];
+    if(!named && container.attributes?.transpose !== true && rows.length>1 && !hasMerges && rows[0]!.children!.every(cell=>cell.header)
+      && labels.every(value=>typeof value === "string" && Boolean(value.trim()) && !/[\r\n]/.test(value) && value.trim() === value) && new Set(labels).size === labels.length) result.source={...result.source,form:"positional"};
     return result;
   } catch(error) {
     if(error instanceof TableSyntaxError) return error.message;
