@@ -9,6 +9,10 @@
   authored spelling, and the colon form for new callouts; `renderHtml` gives
   both spellings the same HTML.
 - Protect literal `[!type]` text at the start of an ordinary quotation.
+- Read unbracketed container titles, `::: warning Before you upgrade`, as the
+  title up to any trailing attribute lists, recorded with
+  `titleSpelling: "unbracketed"` and written back that way. Bracketed
+  `[Title]` stays the default for new titles.
 
 ## 0.1.7
 

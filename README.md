@@ -104,6 +104,7 @@ rendering is available from 0.1.2.
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
 - Nested colon containers, inline/leaf directives, open semantic types and shared string/flag attributes.
 - Alerts, `> [!note] Title`, as a supported second spelling of a callout, written back as authored.
+- Unbracketed container titles, `::: warning Before you upgrade`, written back as authored.
 - Mention shorthand, chips and authored TOC placeholders.
 - Footnotes: `[^label]` references and `[^label]:` definitions, kept where they
   were written and rendered as one numbered, back-linked notes section.

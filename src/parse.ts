@@ -218,7 +218,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
-    const node=readHeader(opening[2]!,options); if(!node) return false;
+    const node=readHeader(opening[2]!,options,true); if(!node) return false;
     if(silent) return true;
     const length=opening[1]!.length;
     let close=start+1;

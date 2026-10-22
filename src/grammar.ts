@@ -95,7 +95,20 @@ export function readLabel(source: string): { value: string; length: number } | u
   }
   return;
 }
-export function readHeader(source: string, options: ConversionOptions = {}): Node | undefined {
+/** Split whitespace-separated attribute lists that end `text`, as headings do. */
+export function trailingAttributeLists(text: string, options: ConversionOptions = {}): { text: string; lists: AttributeResult[] } {
+  for (let i = 0; i < text.length; i++) if (text[i] === "{" && /[ \t]/.test(text[i-1] ?? "")) {
+    let position = i; const lists: AttributeResult[] = [];
+    while (position < text.length) {
+      const attrs = readAttributes(text.slice(position), options); if (!attrs) break;
+      lists.push(attrs); position += attrs.length;
+      position += /^[ \t]*/.exec(text.slice(position))![0].length;
+    }
+    if (position === text.length && lists.length) return { text: text.slice(0, i).trimEnd(), lists };
+  }
+  return { text, lists: [] };
+}
+export function readHeader(source: string, options: ConversionOptions = {}, unbracketed = false): Node | undefined {
   let cursor = /^[ \t]*/.exec(source)![0].length;
   const name = tokenIdentifier(source.slice(cursor));
   if (!name) return;
@@ -110,10 +123,16 @@ export function readHeader(source: string, options: ConversionOptions = {}): Nod
       if (!label) return;
       node.title = {type:"title", value:label.value};
       cursor += label.length;
-    } else {
+    } else if (source[cursor] === "{" || !unbracketed || node.title) {
       const attrs = readAttributes(source.slice(cursor), options);
       if (!attrs) return;
       attach(node, attrs); cursor += attrs.length;
+    } else {
+      // Unbracketed title: the rest of the line, up to trailing attribute lists.
+      const { text, lists } = trailingAttributeLists(source.slice(cursor).trimEnd(), options);
+      node.title = {type:"title", value:text}; node.titleSpelling = "unbracketed";
+      for (const attrs of lists) attach(node, attrs);
+      break;
     }
   }
   return node;
