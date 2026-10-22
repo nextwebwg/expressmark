@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8
+
+- Read alerts, `> [!type] Optional title`, as callouts: the same `container`
+  node as `::: type [Title]`, with `spelling: "alert"`. Types match
+  case-insensitively and keep their own names, including GitHub's `important`
+  and `caution` and custom types. `stringify` writes each callout in its
+  authored spelling, and the colon form for new callouts; `renderHtml` gives
+  both spellings the same HTML.
+- Protect literal `[!type]` text at the start of an ordinary quotation.
+
 ## 0.1.7
 
 - Parse, write and render footnotes. `[^label]` refers to a `[^label]:`

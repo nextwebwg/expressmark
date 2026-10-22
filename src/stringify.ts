@@ -1,6 +1,6 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
-import { diagnoseIds, normalizeLabel, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
+import { alertMarker, diagnoseIds, normalizeLabel, structuralTypes, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
 import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { footnoteDefinitions, linkDefinitions } from "./references.js";
 import { tableGrid, transposeTable } from "./tables.js";
@@ -46,11 +46,11 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
     for(const [i,child] of node[slot].entries()) validate(child,`${path}.${slot}[${i}]`,seen);
   }
   if(node.title !== undefined && node.title !== null && typeof node.title !== "string") validate(node.title,`${path}.title`,seen);
-  const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
+  const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
   for(const key of Object.keys(node)) if(!known.has(key)) fail(`${path}.${key} has no Markdown mapping.`);
   const structural: Record<string,string[]> = {
     document:["version","metadata"], footnoteReference:["label"], footnoteDefinition:["label"],
-    definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
+    container:["spelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
     link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
   };
   for(const key of ["ordered","tight","checked","header"] as const) if(node[key] !== undefined && typeof node[key] !== "boolean") fail(`${path}.${key} must be a boolean.`);
@@ -58,9 +58,10 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   for(const key of ["level","start","colSpan","rowSpan"] as const) if(node[key] !== undefined && (!Number.isInteger(node[key]) || node[key]! < (key === "start" ? 0:1))) fail(`${path}.${key} has an invalid integer value.`);
   if(node.align !== undefined && (!Array.isArray(node.align) || node.align.some(value=>value !== null && !["start","center","end"].includes(value)))) fail(`${path}.align needs column alignment values.`);
   if(node.type === "group" && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
-  const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","align","header","colSpan","rowSpan","display","tag","version","metadata"];
+  const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","align","header","colSpan","rowSpan","display","tag","version","metadata"];
   for(const key of special) if(key in node && !structural[node.type]?.includes(key)) fail(`${path}.${key} is not defined for ${node.type}.`);
   if(node.subType !== undefined && !["container","inline","leaf"].includes(node.type)) fail(`${path}.subType is not defined for ${node.type}.`);
+  if(node.spelling !== undefined && !["container","alert"].includes(node.spelling)) fail(`${path}.spelling needs container or alert.`);
   if(node.ref !== undefined && node.subType !== "mention") fail(`${path}.ref is only defined for mentions.`);
   if(["document","container","blockquote","listItem","footnoteDefinition"].includes(node.type) && !Array.isArray(node.body)) fail(`${path} needs a block body.`);
   if(["footnoteReference","footnoteDefinition"].includes(node.type)) {
@@ -356,11 +357,27 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return `${fence}${info}\n${value}\n${fence}`;
     }
     if(node.type === "horizontalRule") return node.id !== undefined || node.attributes ? safeNative(node):"---";
-    if(node.type === "blockquote") return node.id !== undefined || node.attributes ? safeNative(node):blockArray(node.body ?? []).split("\n").map(value=>`> ${value}`).join("\n");
+    if(node.type === "blockquote") {
+      if(node.id !== undefined || node.attributes) return safeNative(node);
+      // Literal text that would open an alert stays a quotation.
+      const text=blockArray(node.body ?? []).replace(alertMarker,marker=>structuralTypes.has(alertMarker.exec(marker)![1]!.toLowerCase()) ? marker:`\\${marker}`);
+      return text.split("\n").map(value=>`> ${value}`).join("\n");
+    }
     if(node.type === "list") return list(node);
     if(node.type === "container" || node.type === "leaf") {
       if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
       if(!forceTabsWrapper && node.type === "container" && node.subType === "tabs" && !node.id && !node.title && !node.attributes && node.body?.every(child=>child.type === "container" && child.subType === "tab")) return blockArray(node.body);
+      if(node.type === "container" && node.spelling === "alert") {
+        if(node.id !== undefined || node.attributes || structuralTypes.has(node.subType!)) warn(options,"unsupported-alert","An alert has no attribute or structural-type spelling; it is written as a colon container.");
+        else {
+          const body=blockArray(node.body ?? []);
+          // A body that could continue the marker line as something other than
+          // a paragraph, such as a setext underline, starts after a blank line.
+          const joined=node.body?.[0]?.type === "paragraph" && !/^[ \t]*(?:=+|-+)[ \t]*(?:\n|$)/.test(body);
+          const lines=[`[!${node.subType}]${node.title !== undefined ? ` ${caption(node)}`:""}`,...(body ? [...(joined ? []:[""]),...body.split("\n")]:[])];
+          return lines.map(line=>line ? `> ${line}`:">").join("\n");
+        }
+      }
       const fence=":".repeat(node.type === "leaf" ? 2:2+depth(node));
       const header=[node.subType,node.title !== undefined ? `[${caption(node)}]`:undefined,writeAttributes(node)].filter(Boolean).join(" ");
       return node.type === "leaf" ? `${fence}${header}` : `${fence} ${header}\n${blockArray(node.body ?? [])}\n${fence}`;

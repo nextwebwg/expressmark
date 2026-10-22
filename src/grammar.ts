@@ -5,6 +5,10 @@ import { ConversionError, warn } from "./types.js";
 const identifier = regex(/[A-Za-z][A-Za-z0-9_-]*/);
 const handle = regex(/[\p{L}\p{N}_][\p{L}\p{M}\p{N}_-]*/u);
 const entry = regex(/(?:#[^\s&{}]+|!?[A-Za-z][A-Za-z0-9_-]*(?:=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s&{}"']+))?)/);
+// `> [!type] Title` opens an alert: the marker is followed by a space, tab or line end.
+export const alertMarker=/^\[!([A-Za-z][A-Za-z0-9_-]*)\](?:[ \t]+([^\n]*))?[ \t]*(?:\n|$)/;
+// Recognized structural types keep the colon form; an alert names a callout.
+export const structuralTypes=new Set(["details","figure","layout","tabs","tab","toc","table"]);
 export function tokenIdentifier(source: string): string | undefined {
   const result = run(identifier, source);
   return result.ok ? result.value : undefined;
