@@ -2,7 +2,7 @@ import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markd
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { attach, compact, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { alertMarker, attach, compact, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { htmlNodes, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import type { ConversionOptions, Document, Json, Node } from "./types.js";
@@ -218,7 +218,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
-    const node=readHeader(opening[2]!,options); if(!node) return false;
+    const node=readHeader(opening[2]!,options,true); if(!node) return false;
     if(silent) return true;
     const length=opening[1]!.length;
     let close=start+1;
@@ -404,7 +404,20 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           for(const attrs of attached) attach(node,attrs);
           if(token.type === "paragraph_open") { const task=/^\[([ xX])\][ \t]+/.exec(content); if(task) tasks.set(node,task); }
           cursor++; nodes.push(node);
-        } else if(token.type === "blockquote_open") nodes.push({type:"blockquote",body:read("blockquote_close")});
+        } else if(token.type === "blockquote_open") {
+          // A marker opening the quote's first line makes it an alert: the same
+          // callout as a colon container, recording the authored spelling.
+          const first=tokens[cursor]?.type === "paragraph_open" ? tokens[cursor+1]!.content : "";
+          const marker=alertMarker.exec(first);
+          if(marker && !structuralTypes.has(marker[1]!.toLowerCase())) {
+            const node: Node={type:"container",subType:marker[1]!.toLowerCase(),spelling:"alert",body:[]};
+            if(marker[2]?.trim()) node.title=compact({type:"title"},inline(marker[2].trim()));
+            const rest=first.slice(marker[0].length);
+            cursor+=3;
+            node.body=[...(rest ? [compact({type:"paragraph"},inline(rest))]:[]),...read("blockquote_close")];
+            nodes.push(node);
+          } else nodes.push({type:"blockquote",body:read("blockquote_close")});
+        }
         else if(token.type === "bullet_list_open" || token.type === "ordered_list_open") {
           const listStart=cursor;
           const node: Node={type:"list",ordered:token.type === "ordered_list_open",tight:true,children:read(token.type.replace("_open","_close"))};

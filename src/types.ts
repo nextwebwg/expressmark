@@ -29,6 +29,10 @@ export interface Node {
   ref?: string;
   label?: string;
   referenceType?: "full" | "collapsed" | "shortcut";
+  /** The authored callout spelling: a colon container (the default) or an alert. */
+  spelling?: "container" | "alert";
+  /** The authored container title spelling: `[Title]` (the default) or unbracketed text. */
+  titleSpelling?: "bracketed" | "unbracketed";
   align?: ("start" | "center" | "end" | null)[];
   header?: boolean;
   colSpan?: number;
