@@ -78,8 +78,8 @@ its own authors write can keep raw HTML and admit its components with
 stays the strict safe profile.
 
 Open semantic types and attributes cover most application customization without
-new grammar. markdown-it is an internal engine; Expressmark exposes no supported
-parser-plugin or engine-configuration API.
+new grammar. The Markdown reader is internal; Expressmark exposes no supported
+parser-plugin or reader-configuration API.
 
 ## Align and float content
 
@@ -218,9 +218,11 @@ In Conductor, add this repository with **Open project**. The checked-in
 watch and benchmark commands. Shared settings take effect locally after merging
 them to the default branch.
 
-TypeScript 7 builds strict ESM declarations. Parseman recognizes extension tokens;
-markdown-it handles base Markdown, YAML handles metadata, and sanitize-html with
-htmlparser2 handles the safe native profile. Oxlint and Vitest check conversions,
+TypeScript 7 builds strict ESM declarations. Parseman grammars recognize Markdown's
+constructs and the extension tokens; the reader in `src/markdown` applies
+CommonMark's block and emphasis algorithms to what they recognize. YAML handles
+metadata, linkify-it finds bare URLs, and sanitize-html with htmlparser2 handles
+the safe native profile. Oxlint and Vitest check conversions,
 unsafe input, malformed data, round trips and a fresh packed-package consumer.
 
 The manual **Release** workflow publishes reviewed `main` through the protected

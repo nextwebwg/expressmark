@@ -1,5 +1,6 @@
-import type MarkdownIt from "markdown-it";
-import type { StateBlock, StateInline, Token } from "markdown-it";
+import type { Engine, StateBlock, StateInline, Token } from "./markdown/engine.js";
+import type { Ruler } from "./markdown/ruler.js";
+import { skipBulletListMarker, skipOrderedListMarker } from "./markdown/block.js";
 import { rawTextElements, readElement, readStartTag, type ElementExtent } from "./html.js";
 import type { ConversionOptions } from "./types.js";
 import { linting, warn } from "./types.js";
@@ -9,14 +10,15 @@ export const modernRules = ["html","indentedCode","setext","spaceBreaks","tableC
 export type ModernRule = typeof modernRules[number];
 type BlockRule = (state: StateBlock, start: number, end: number, silent: boolean) => boolean;
 type InlineRule = (state: StateInline, silent: boolean) => boolean;
-interface RuleEntry<T> { name: string; fn: T; alt: string[] }
-const entry = <T,>(ruler: unknown, name: string) => (ruler as {__rules__: RuleEntry<T>[]}).__rules__.find(rule => rule.name === name);
+const entry = <T,>(ruler: Ruler<T>, name: string) => ruler.get(name);
 
 const trim = (value: string) => value.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "");
-const isSpace = (code: number) => code === 0x20 || code === 0x09;
 
-/** Install `modern` syntax's rules on a parser instance. */
-export function installModern(md: InstanceType<typeof MarkdownIt>, lexical: InstanceType<typeof MarkdownIt>, rules: ReadonlySet<ModernRule>, options: ConversionOptions): void {
+// A parse's options travel with its reader state, so one reader serves every parse.
+const optionsOf = (state: { env: Record<string, unknown> }) => state.env.options as ConversionOptions;
+
+/** Install `modern` syntax's rules on a reader. */
+export function installModern(md: Engine, lexical: Engine, rules: ReadonlySet<ModernRule>): void {
   const on = (rule: ModernRule) => rules.has(rule);
   const block = md.block.ruler;
   if (on("indentedCode")) {
@@ -47,7 +49,7 @@ export function installModern(md: InstanceType<typeof MarkdownIt>, lexical: Inst
   if (on("lazy") || on("indentedCode")) block.at("paragraph", (state, start, end) => paragraph(state, start, end, on("lazy"), on("indentedCode")));
   if (on("relativeLists") || on("bullets") || on("looseLists") || on("indentedCode")) {
     const rule = entry<BlockRule>(block, "list")!;
-    block.at("list", (state, start, end, silent) => list(state, start, end, silent, rules, options), { alt: [...rule.alt] });
+    block.at("list", (state, start, end, silent) => list(state, start, end, silent, rules, optionsOf(state)), { alt: [...rule.alt] });
   }
   if (on("tableCode")) {
     const rule = entry<BlockRule>(block, "table")!; const fn = rule.fn;
@@ -55,8 +57,8 @@ export function installModern(md: InstanceType<typeof MarkdownIt>, lexical: Inst
   }
   if (on("html")) {
     const rule = entry<BlockRule>(block, "html_block")!;
-    block.at("html_block", (state, start, end, silent) => htmlElement(state, start, end, silent, options), { alt: [...rule.alt] });
-    md.inline.ruler.before("autolink", "modern_raw_text", (state, silent) => rawText(state, silent, options));
+    block.at("html_block", (state, start, end, silent) => htmlElement(state, start, end, silent, optionsOf(state)), { alt: [...rule.alt] });
+    md.inline.ruler.before("autolink", "modern_raw_text", (state, silent) => rawText(state, silent, optionsOf(state)));
   }
   if (on("spaceBreaks")) {
     // Trailing spaces are insignificant; a break is a trailing backslash or `<br>`.
@@ -97,29 +99,6 @@ function paragraph(state: StateBlock, start: number, end: number, noLazy: boolea
   return true;
 }
 
-function bulletMarker(state: StateBlock, line: number): number {
-  const max = state.eMarks[line]!;
-  let pos = state.bMarks[line]! + state.tShift[line]!;
-  const marker = state.src.charCodeAt(pos++);
-  if (marker !== 0x2a && marker !== 0x2d && marker !== 0x2b) return -1;
-  return pos < max && !isSpace(state.src.charCodeAt(pos)) ? -1 : pos;
-}
-function orderedMarker(state: StateBlock, line: number): number {
-  const start = state.bMarks[line]! + state.tShift[line]!;
-  const max = state.eMarks[line]!;
-  let pos = start;
-  if (pos + 1 >= max) return -1;
-  let code = state.src.charCodeAt(pos++);
-  if (code < 0x30 || code > 0x39) return -1;
-  for (;;) {
-    if (pos >= max) return -1;
-    code = state.src.charCodeAt(pos++);
-    if (code >= 0x30 && code <= 0x39) { if (pos - start >= 10) return -1; continue; }
-    if (code === 0x29 || code === 0x2e) break;
-    return -1;
-  }
-  return pos < max && !isSpace(state.src.charCodeAt(pos)) ? -1 : pos;
-}
 const leading = (state: StateBlock, line: number) => state.src.slice(state.bMarks[line]!, state.bMarks[line]! + state.tShift[line]!);
 const unrelated = (a: string, b: string) => !a.startsWith(b) && !b.startsWith(a);
 
@@ -133,13 +112,13 @@ function list(state: StateBlock, startLine: number, endLine: number, silent: boo
   if (!anyIndent && state.listIndent >= 0 && state.sCount[line]! - state.listIndent >= 4 && state.sCount[line]! < state.blkIndent) return false;
   const terminating = silent && state.parentType === "paragraph" && state.sCount[line]! >= state.blkIndent;
   let ordered: boolean, value = 1, start = 0;
-  let after = orderedMarker(state, line);
+  let after = skipOrderedListMarker(state, line);
   if (after >= 0) {
     ordered = true;
     start = state.bMarks[line]! + state.tShift[line]!;
     value = Number(state.src.slice(start, after - 1));
     if (terminating && value !== 1) return false;
-  } else if ((after = bulletMarker(state, line)) >= 0) ordered = false;
+  } else if ((after = skipBulletListMarker(state, line)) >= 0) ordered = false;
   else return false;
   if (terminating && state.skipSpaces(after) >= state.eMarks[line]!) return false;
   if (silent) return true;
@@ -216,11 +195,11 @@ function list(state: StateBlock, startLine: number, endLine: number, silent: boo
     if (!anyIndent && state.sCount[line]! - state.blkIndent >= 4) break;
     if (terminators.some(rule => rule(state, line, endLine, true))) break;
     if (ordered) {
-      after = orderedMarker(state, line);
+      after = skipOrderedListMarker(state, line);
       if (after < 0) break;
       start = state.bMarks[line]! + state.tShift[line]!;
     } else {
-      after = bulletMarker(state, line);
+      after = skipBulletListMarker(state, line);
       if (after < 0) break;
     }
     if (!anyMarker && marker !== state.src.charCodeAt(after - 1)) break;

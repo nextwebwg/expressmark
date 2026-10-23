@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.19
+
+- Read Markdown with Parseman. Grammars in `src/markdown/lexicon.ts` recognize
+  each block start and inline construct, and the reader in `src/markdown` applies
+  CommonMark's container, link and emphasis algorithms to what they recognize,
+  following markdown-it 15.0.3's behavior exactly. Every document of the
+  CommonMark and GFM example sets and the 398-README corpus parses, lints, writes
+  and writes canonically as 0.1.18 does, in both syntaxes and both HTML profiles.
+  The dependencies are Parseman 0.55.3, entities, linkify-it, mdurl, punycode.js
+  and uc.micro.
+- Parse in 0.80× of 0.1.18's time on the README corpus in `compatible` syntax,
+  0.54× in `modern`, and about 0.41× on the CommonMark and GFM examples, whose
+  short documents gain most from readers built once per rule set. See
+  [the measurements](benchmarks/results/README.md).
+- Read a document's pipe tables and HTML elements in time linear in its length.
+- Round-trip every CommonMark 0.31.2 and GFM 0.29 example byte for byte in the
+  test suite, in both syntaxes.
+
 ## 0.1.18
 
 - Update Parseman to 0.55.2 and markdown-it to 15.0.3. Every corpus README and

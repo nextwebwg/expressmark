@@ -1,6 +1,6 @@
-import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markdown-it";
+import { Engine, type StateBlock, type StateInline, type Token } from "./markdown/engine.js";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
-import { configureAutolinks } from "./autolinks.js";
+import { autolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, contentHash, contentHashes, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
@@ -45,6 +45,47 @@ function codeFence(node: Node): string {
   const marker=[node.language,node.meta].some(value=>value?.includes("`")) ? "~":"`";
   return marker.repeat(Math.max(3,...Array.from((node.value ?? "").matchAll(new RegExp(`${marker}+`,"g")),m=>m[0].length+1)));
 }
+// The rules Expressive Markdown adds to the reader. A reader is built once per
+// rule set; each rule runs the parse's own implementation, found in `env`.
+type BlockHook = (state: StateBlock, start: number, end: number, silent: boolean) => boolean;
+type InlineHook = (state: StateInline, silent: boolean) => boolean;
+interface Hooks {
+  expressive_line_code: InlineHook; expressive: InlineHook; expressive_attachment: InlineHook; newline: InlineHook; link: InlineHook; image: InlineHook;
+  bracketed_span: InlineHook; footnote_reference: InlineHook;
+  footnote_definition: BlockHook; reference: BlockHook; expressive_container: BlockHook; expressive_leaf: BlockHook; expressive_line_block: BlockHook;
+}
+interface Readers { md: Engine; lexicalMd: Engine; originals: { reference: BlockHook; newline: InlineHook; link: InlineHook; image: InlineHook } }
+const hooksOf = (state: {env: Record<string,unknown>}) => state.env.hooks as Hooks;
+const readerCache=new Map<string,Readers>();
+function readers(modern: ReadonlySet<ModernRule>): Readers {
+  const key=[...modern].sort().join(",");
+  const cached=readerCache.get(key);
+  if(cached) return cached;
+  const md=new Engine("default",{html:true,linkify:true},autolinks);
+  const lexicalMd=new Engine("default",{html:true},autolinks);
+  const originals={reference:md.block.ruler.get("reference").fn,newline:md.inline.ruler.get("newline").fn,link:md.inline.ruler.get("link").fn,image:md.inline.ruler.get("image").fn};
+  const inlineHook=(name: keyof Hooks): InlineHook => (state,silent) => (hooksOf(state)[name] as InlineHook)(state,silent);
+  const blockHook=(name: keyof Hooks): BlockHook => (state,start,end,silent) => (hooksOf(state)[name] as BlockHook)(state,start,end,silent);
+  const blocks=["paragraph","reference","blockquote","list"];
+  md.inline.ruler.before("backticks","expressive_line_code",inlineHook("expressive_line_code"));
+  md.inline.ruler.before("emphasis","expressive",inlineHook("expressive"));
+  md.inline.ruler.after("expressive","expressive_attachment",inlineHook("expressive_attachment"));
+  md.block.ruler.before("reference","footnote_definition",blockHook("footnote_definition"),{alt:["paragraph","reference"]});
+  md.block.ruler.at("reference",blockHook("reference"));
+  md.core.ruler.disable("strip_references");
+  md.inline.ruler.at("newline",inlineHook("newline"));
+  md.inline.ruler.at("link",inlineHook("link"));
+  md.inline.ruler.at("image",inlineHook("image"));
+  md.inline.ruler.after("link","bracketed_span",inlineHook("bracketed_span"));
+  md.inline.ruler.before("link","footnote_reference",inlineHook("footnote_reference"));
+  md.block.ruler.before("fence","expressive_container",blockHook("expressive_container"),{alt:blocks});
+  md.block.ruler.before("paragraph","expressive_leaf",blockHook("expressive_leaf"),{alt:blocks});
+  md.block.ruler.before("paragraph","expressive_line_block",blockHook("expressive_line_block"),{alt:blocks});
+  if(modern.size) installModern(md,lexicalMd,modern);
+  const built={md,lexicalMd,originals};
+  readerCache.set(key,built);
+  return built;
+}
 export function parse(markdown: string, options: ConversionOptions = {}): Document {
   spelled=false;
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
@@ -54,15 +95,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   // Lint warnings report the source lines of the block holding each construct.
   const positions=new WeakMap<Node,Position>();
   let lineOffset=0;
-  const md = new MarkdownIt({html:true,linkify:true,typographer:false});
-  const lexicalMd=new MarkdownIt({html:true});
+  // The readers for the document's rules, chosen once the frontmatter is read.
+  let md: Engine, lexicalMd: Engine, originals: Readers["originals"];
+  const hooks={} as Hooks;
   // Per block state: table cells parse their own sources.
   const lexicalRanges=new WeakMap<StateBlock,Map<string,{from:number;ranges:Map<number,number>}>>();
-  configureAutolinks(md);
   // Definition labels, collected by the block pass before any inline content is read.
   const footnotes=new Set<string>();
   const defined=new Set<string>();
-  const env: Record<string,unknown> = {};
+  const env: Record<string,unknown> = {hooks,options};
   const tasks=new WeakMap<Node,RegExpExecArray>();
   let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
   let recoveredFrontmatter: Node | undefined;
@@ -88,15 +129,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     if (node.attributes && Object.keys(node.attributes).length === 0) delete node.attributes;
   }
-  md.inline.ruler.before("backticks","expressive_line_code",(state,silent)=> {
+  hooks.expressive_line_code=(state,silent)=> {
     if(!lineMode || state.src[state.pos] !== "`") return false;
     const ticks=/^`+/.exec(state.src.slice(state.pos))![0];
     const close=state.src.indexOf(ticks,state.pos+ticks.length);
     if(close<0 || !state.src.slice(state.pos+ticks.length,close).includes("\n")) return false;
     if(!silent) state.push("text","",0).content=ticks;
     state.pos+=ticks.length; return true;
-  });
-  md.inline.ruler.before("emphasis","expressive",(state: StateInline,silent: boolean) => {
+  };
+  hooks.expressive=(state,silent) => {
     const start=state.pos;
     const marker=state.src[start];
     if (marker !== ":" && marker !== "@") return false;
@@ -149,8 +190,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const token=state.push("expressive_inline","",0); token.meta={node};
     state.pos=cursor;
     return true;
-  });
-  md.inline.ruler.after("expressive","expressive_attachment",(state: StateInline,silent: boolean) => {
+  };
+  hooks.expressive_attachment=(state,silent) => {
     if(state.src[state.pos] !== "{") return false;
     const last=state.tokens.at(-1);
     if(!last || !["image","link_close"].includes(last.type)) return false;
@@ -161,8 +202,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     (last.meta as {attributesSource?: string}).attributesSource=`${(last.meta as {attributesSource?: string}).attributesSource ?? ""}${state.src.slice(state.pos,state.pos+attrs.length)}`;
     state.pos+=attrs.length;
     return true;
-  });
-  md.block.ruler.before("reference","footnote_definition",(state,start,end,silent) => {
+  };
+  hooks.footnote_definition=(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const begin=state.bMarks[start]!+state.tShift[start]!;
     const match=/^\[\^([^\]]*)\]:/.exec(state.src.slice(begin,state.eMarks[start]));
@@ -196,13 +237,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.tShift[start]=saved.tShift; state.sCount[start]=saved.sCount; state.bMarks[start]=saved.bMark;
     state.push("footnote_close","",-1);
     return true;
-  },{alt:["paragraph","reference"]});
+  };
   // Reference definitions and reference links keep their authored form. Wrap
-  // markdown-it's own rules so CommonMark decides what matches; then record it.
-  type Rule<T> = {__rules__:{name:string;fn:T}[]};
-  const original=<T,>(ruler: unknown, name: string)=>(ruler as Rule<T>).__rules__.find(rule=>rule.name === name)!.fn;
-  const referenceRule=original<(state: StateBlock,start: number,end: number,silent: boolean)=>boolean>(md.block.ruler,"reference");
-  md.block.ruler.at("reference",(state,start,end,silent) => {
+  // the reader's own rules so CommonMark decides what matches; then record it.
+  hooks.reference=(state,start,end,silent) => {
     const env=state.env as {references?: Record<string,{href:string;title:string}>};
     const outer=env.references ?? {};
     // A fresh table reveals this definition's values even when an earlier one
@@ -210,10 +248,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const own: NonNullable<typeof env.references>={};
     env.references=own;
     let matched: boolean;
-    try { matched=referenceRule(state,start,end,silent); } finally { env.references=outer; }
+    try { matched=originals.reference(state,start,end,silent); } finally { env.references=outer; }
     if(!matched || silent) return matched;
     const [key,value]=Object.entries(own)[0]!;
-    // markdown-it's own token keeps only the normalized label; record the authored one.
+    // The reader's own token keeps only the normalized label; record the authored one.
     const raw=/^\[((?:\\[\s\S]|[^\\[\]])*)\]:/.exec(state.getLines(start,state.line,state.blkIndent,false).trimStart())!;
     if(key in outer) {
       warn(options,"duplicate-definition",`Link reference [${raw[1]}] is defined more than once; the ${modern.has("lastDefinition") ? "last":"first"} definition is used.`);
@@ -221,22 +259,20 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     } else outer[key]=value;
     state.tokens.at(-1)!.meta={label:raw[1],url:value.href,title:value.title,markdown:state.getLines(start,state.line,state.blkIndent,false).trim()};
     return true;
-  });
-  md.core.ruler.disable("strip_references");
-  const newlineRule=original<(state: StateInline,silent: boolean)=>boolean>(md.inline.ruler,"newline");
-  md.inline.ruler.at("newline",(state,silent) => {
+  };
+  hooks.newline=(state,silent) => {
     // Trailing spaces spell a hard break as well as a backslash does.
     let spaces=0;
     if(state.src[state.pos] === "\n") while(state.pending[state.pending.length-1-spaces] === " ") spaces++;
     const count=state.tokens.length;
-    if(!newlineRule(state,silent)) return false;
+    if(!originals.newline(state,silent)) return false;
     const token=state.tokens.slice(count).find(candidate=>candidate.type === "hardbreak");
     if(token && spaces >= 2) token.meta={spaces};
     return true;
-  });
+  };
   for(const [name,offset] of [["link",0],["image",1]] as const) {
-    const rule=original<(state: StateInline,silent: boolean)=>boolean>(md.inline.ruler,name);
-    md.inline.ruler.at(name,(state,silent) => {
+    hooks[name]=(state,silent) => {
+      const rule=originals[name];
       const start=state.pos;
       const count=state.tokens.length;
       if(!rule(state,silent)) return false;
@@ -254,12 +290,12 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         token.meta={...token.meta,reference:{label:full ? full[1]:text,referenceType:full ? "full":rest ? "collapsed":"shortcut"}};
       }
       return true;
-    });
+    };
   }
   // `[text]{attributes}` is a bracketed span when the bracket is no link. It
   // runs after the link rule, so links and resolving references keep their
   // lists; `![…]` stays image syntax and `[^…]` footnote syntax.
-  md.inline.ruler.after("link","bracketed_span",(state: StateInline,silent: boolean) => {
+  hooks.bracketed_span=(state,silent) => {
     // Link-label scans see the bracket as text; a span forms when the link's
     // own content is parsed, so a span may sit inside link text.
     if(silent || state.src[state.pos] !== "[" || state.src[state.pos+1] === "^") return false;
@@ -283,8 +319,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     state.pos=cursor;
     return true;
-  });
-  md.inline.ruler.before("link","footnote_reference",(state: StateInline,silent: boolean) => {
+  };
+  hooks.footnote_reference=(state,silent) => {
     if(state.src[state.pos] !== "[" || state.src[state.pos+1] !== "^") return false;
     const label=tokenHandle(state.src.slice(state.pos+2));
     if(!label || state.src[state.pos+2+label.length] !== "]") return false;
@@ -293,8 +329,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(!silent) { const token=state.push("footnote_ref","",0); token.meta={label}; token.content=`[^${label}]`; }
     state.pos+=label.length+3;
     return true;
-  });
-  md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
+  };
+  hooks.expressive_container=(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
     // Every colon fence opens a container. A header that cannot be read gives
@@ -386,8 +422,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.parentType=oldParent;
     state.push("expressive_container_close","",-1);
     state.line=after; return true;
-  },{alt:["paragraph","reference","blockquote","list"]});
-  md.block.ruler.before("paragraph","expressive_leaf",(state,start,_end,silent) => {
+  };
+  hooks.expressive_leaf=(state,start,_end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const match=/^::(?!:)(.*)$/.exec(line(state,start)); if(!match) return false;
     const node=readHeader(match[1]!,options); if(!node) return false;
@@ -398,8 +434,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(header !== [node.subType,label === undefined ? undefined : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ")) spell(node,"header",header);
     const leaf=state.push("expressive_leaf","",0); leaf.meta={node}; leaf.map=[start,start+1];
     state.line=start+1; return true;
-  },{alt:["paragraph","reference","blockquote","list"]});
-  md.block.ruler.before("paragraph","expressive_line_block",(state,start,end,silent) => {
+  };
+  hooks.expressive_line_block=(state,start,end,silent) => {
     if(state.parentType === "table") return false;
     const first=line(state,start);
     if(state.sCount[start]! - state.blkIndent >= 4 || !/^\|(?:[ \t]|$)/.test(first)) return false;
@@ -425,7 +461,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const authored=state.getLines(start,cursor,state.blkIndent,false).trimEnd();
     if(authored !== lines.map(value=>value ? `| ${value}`:"|").join("\n")) token.meta={markdown:authored};
     state.line=cursor; return true;
-  },{alt:["paragraph","reference","blockquote","list"]});
+  };
 
   function spellTarget(node: Node, target: unknown): void {
     if(typeof target === "string" && target !== `(${destination(node.url ?? "")}${typeof node.title === "string" ? ` ${quoteAttribute(node.title)}`:""})`) spell(node,"target",target);
@@ -577,7 +613,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   function blocks(tokens: Token[], original: string): Node[] {
     let cursor=0;
     let sourceLines: string[] | undefined;
-    const lineAt=(index: number)=>(sourceLines ??= original.split("\n"))[index] ?? "";
+    // The source's lines, split once: a document's tables would otherwise split it once each.
+    const lines=()=>sourceLines ??= original.split("\n");
+    const lineAt=(index: number)=>lines()[index] ?? "";
     // The block nodes a token made take its source lines, for lint positions.
     const place=(nodes: Node[], at: number, map: [number,number] | null | undefined)=> {
       if(!map || original !== source) return;
@@ -753,7 +791,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           // Convert after the document block pass has collected link references.
           const meta=token.meta as {node:Node;body:string;source:string};
           title(meta.node);
-          const table=readListTable(meta.node,meta.body,md,value=>blocks(md.parse(value,env),value));
+          const table=readListTable(meta.node,meta.body,value=>md.parse(value,{hooks,options}),value=>blocks(md.parse(value,env),value));
           if(typeof table === "string") {
             nodes.push({type:"literal",display:"block",value:sanitizeLiteral(meta.source,options)});
             warn(options,"invalid-table",table);
@@ -805,29 +843,29 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
             cursor++; rows.push(row); rawCells.push(sources);
           }
           cursor++;
-          // markdown-it reports physical CSS values for GFM markers; the public AST uses logical directions.
+          // The reader reports physical CSS values for GFM markers; the public AST uses logical directions.
           const alignment=rows[0]?.children?.map((_cell,index)=> {
             const first=tokens.slice(start,cursor).filter(t=>t.type === "th_open")[index];
             const style=String(first?.attrGet("style") ?? ""); return style?.includes("center") ? "center" : style?.includes("right") ? "end" : style?.includes("left") ? "start" : null;
           }) ?? [];
           const table: Node={type:"table",children:rows};
           if(alignment.some(Boolean)) table.align=alignment;
-          const originalRows=token.map ? original.split("\n").slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(splitRow) : rawCells;
+          const originalRows=token.map ? lines().slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(splitRow) : rawCells;
           const hasMerges=originalRows.some(row=>row.some(cell=>/^[>^]$/.test(cell.trim())));
           // Lint: `\|` in a cell's code span, which `modern` syntax keeps as written.
-          if(token.map && original === source && !modern.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(original.split("\n").slice(token.map[0],token.map[1]).join("\n")))
+          if(token.map && original === source && !modern.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(lines().slice(token.map[0],token.map[1]).join("\n")))
             options.onDiagnostic?.({code:"table-code-pipe",message:"A code span in this table writes \\| for a pipe; in modern syntax the backslash shows, so write |.",severity:"warning",preferred:"| inside the code span",position:{start:{line:token.map[0]+lineOffset+1,column:1},end:{line:token.map[1]+lineOffset,column:lineAt(token.map[1]-1).length+1}}});
           const invalid=hasMerges && originalRows.some(row=>row.length !== (rows[0]?.children?.length ?? 0)) ? "Merged tables require every authored row to supply the same column count." : mergeTable(table,rawCells);
           if(invalid) {
             const range=token.map;
-            const value=range ? original.split("\n").slice(range[0],range[1]).join("\n") : rawCells.map(row=>`| ${row.join(" | ")} |`).join("\n");
+            const value=range ? lines().slice(range[0],range[1]).join("\n") : rawCells.map(row=>`| ${row.join(" | ")} |`).join("\n");
             nodes.push({type:"literal",display:"block",value:sanitizeHtml(value,options)});
             warn(options,"invalid-table-merge",invalid);
           } else {
             // Pipe source is a second table spelling; its padding is part of it.
             spell(table,"form","pipe");
             // Inside a quote the lines carry its markers; the canonical pipe form applies there.
-            const authored=token.map ? original.split("\n").slice(token.map[0],token.map[1]).join("\n").trim() : "";
+            const authored=token.map ? lines().slice(token.map[0],token.map[1]).join("\n").trim() : "";
             if(authored && !/^[ \t]*>/m.test(authored)) spell(table,"markdown",authored);
             nodes.push(table);
           }
@@ -900,8 +938,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   if(syntax === "modern") {
     // `modernRules` selects single rules for measurement; documents use them all.
     for(const rule of (options as {modernRules?: readonly ModernRule[]}).modernRules ?? modernRules) modern.add(rule);
-    installModern(md,lexicalMd,modern,options);
   }
+  ({md,lexicalMd,originals}=readers(modern));
   if(syntax === "modern" || frontSyntax) document.syntax=syntax;
   document.body=normalizeTabs(blocks(md.parse(source,env),source));
   if(documentTitle !== undefined) document.title=compact({type:"title"},inline(documentTitle));

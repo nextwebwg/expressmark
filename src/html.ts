@@ -495,7 +495,10 @@ export interface ElementExtent { name: string; tagEnd: number; closeStart: numbe
 export function skipCode(source: string, from: number, before: number, limit: number): number | undefined {
   const tick = /`+|(?:^|\n)[ \t]*~{3,}/g;
   tick.lastIndex = from;
-  for (let match = tick.exec(source); match && match.index < before; match = tick.exec(source)) {
+  // A run that starts before `before` ends there, at its `<`: searching only the
+  // text before it keeps an element's scan linear in its length.
+  const head = source.slice(0, before);
+  for (let match = tick.exec(head); match; match = tick.exec(head)) {
     const run = match[0].replace(/^\n?[ \t]*/, "");
     const lineStart = source.lastIndexOf("\n", match.index + match[0].length - run.length - 1) + 1;
     const fence = run.length >= 3 && !source.slice(lineStart, match.index + match[0].length - run.length).trim();

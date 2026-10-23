@@ -1,9 +1,10 @@
 # Future parser and performance exploration
 
-Expressmark currently keeps markdown-it as an internal Markdown engine. Parseman
-recognizes Expressive Markdown identifiers, mention handles and attribute tokens.
-This is the current implementation boundary, not a complete Parseman grammar.
-There is no supported parser-plugin API. Most application customization should
+Expressmark reads Markdown with its own internal reader in `src/markdown`.
+Parseman grammars in `src/markdown/lexicon.ts` and `src/grammar.ts` recognize
+each construct at a line or a character; the reader applies CommonMark's
+context-sensitive algorithms to what they report. There is no supported
+parser-plugin API. Most application customization should
 use standard semantic types, attributes and per-node HTML transformers.
 
 This note is a research backlog for agents. It authorizes no dependency migration,
@@ -51,41 +52,47 @@ memory and shipped size together. Record regressions by workload instead of
 hiding them in one average. Avoid caches that make repeated-input benchmarks
 look fast while changing mutation, diagnostics or memory behavior.
 
-An Expressmark parse includes work after markdown-it tokenization. Beating the
-underlying engine's raw tokenization is not an assumed success condition. Claims
+An Expressmark parse includes work after tokenization: AST conversion, HTML
+filtering and the source record for exact writing. Beating a standalone
+tokenizer is not an assumed success condition. Claims
 such as “fastest Markdown parser” require a defined comparison set, equivalent
 work, representative inputs, and repeatable results; a single microbenchmark
 cannot establish them.
 
-## Explore a complete Parseman implementation
+## The Parseman reader and what remains open
 
-The alternative worth evaluating is a Parseman grammar for the **whole document**,
-including ordinary Markdown. Wrapping a foreign parser, or calling Parseman for
-three terminals, does not demonstrate that alternative.
+The boundary is explicit. Parseman grammars recognize what starts at a position:
+fences, ATX headings, thematic breaks, list markers, setext underlines, table
+delimiter rows and cells, the seven HTML block starts, HTML tags, text runs,
+autolinks, character references, angle-bracket destinations, and Expressive
+Markdown's identifiers, handles and attribute lists. The reader's passes are
+the context-sensitive parts of CommonMark that a grammar over one string does
+not express: container continuation and lazy lines (which strip a variable
+prefix from every line, with tabs split across columns), list tightness, link
+label scanning across nested constructs, reference resolution and the
+delimiter-run algorithm. Their behavior follows markdown-it 15.0.3 exactly; the
+benchmark suite's `parity.mjs` checks this against any earlier checkout.
 
-Before a migration:
+The reader runs the grammars through Parseman's interpreter, which constructs no
+code at runtime and so runs under a strict Content Security Policy.
 
-1. Map current block, inline, reference, delimiter, recovery, HTML and extension
-   behavior to its owning tests. Include list-table structure, fence precedence,
-   merged grids, identity and canonical-writing invariants.
-2. Design Parseman grammar rules for recognition and identify the semantic passes
-   required by context-sensitive Markdown behavior. Keep the boundary explicit;
-   do not disguise an existing parser behind a Parseman entry point.
-3. Build an isolated implementation against the existing AST. Check interpreted,
-   runtime-compiled and build-time grammar routes available in the pinned Parseman
-   version. Verify output parity and strict-CSP behavior for any shipped route.
-4. Run the unchanged Expressmark regression suite and an independently sourced
-   CommonMark/GFM corpus. Pin the corpus and its license. Investigate differences;
-   do not rewrite expectations merely to make the new engine pass.
-5. Compare the full pipeline with the incumbent. Include cold startup, warm parses,
-   failure/recovery paths, memory, dependency weight and bundle size. Separate
-   Parseman compilation cost from steady-state parsing.
-6. Recommend migration only with documented correctness coverage and measured
-   benefits. Report unsupported cases, maintenance burden, compatibility risks,
-   and any improvements needed in Parseman itself.
+Open questions, each needing its own task:
 
-A prototype is evidence, not permission to replace the shipped engine. Keep
-public AST and converter contracts stable unless the owner approves a change.
+1. **Incremental parsing.** Top-level blocks are restart points: the block
+   reader's state is empty between them, and the source record already holds each
+   top-level block's line range. Re-reading from the block that contains an edit
+   until block boundaries realign, then converting only re-read blocks, maps onto
+   Parseman's `parseDoc` with the block reader as a rule function. Inline content
+   depends on the document's link and footnote labels, so a change to that label
+   set re-converts every block's inline content.
+2. **Containers as grammar.** Expressing blockquotes and list items as Parseman
+   rules needs a way to run a rule over lines with a per-line prefix removed and
+   spans mapped back, a capability Parseman does not offer.
+3. **Bare URL detection** uses linkify-it's patterns; a Parseman grammar for GFM's
+   autolink extension would need to reproduce its boundaries exactly.
+
+Any change here keeps the public AST and converter contracts stable unless the
+owner approves a change.
 
 ## Preserve the author’s source form
 
@@ -134,11 +141,10 @@ fallback behavior and validity belong there. Discuss those questions in a
 separate specification task; this tooling repository must not acquire a parallel
 specification or support profile.
 
-A markdown-it plugin being installable does not prove semantic compatibility with
-Expressmark's AST, safe HTML policy or canonical writer. Plugins that emit only
-HTML may discard editable structure. CommonJS/ESM interoperability and type
-availability are additional compatibility checks, not reasons to expose the
-underlying engine as a public contract.
+A syntax extension from another Markdown ecosystem proves no semantic
+compatibility with Expressmark's AST, safe HTML policy or canonical writer.
+Extensions that emit only HTML may discard editable structure. The reader stays
+internal rather than becoming a public plugin contract.
 
 ## Leave a useful research result
 

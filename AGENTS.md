@@ -25,8 +25,9 @@
 
 ## Future exploration
 
-- Keep markdown-it internal; do not expose parser plugins without an explicit task
-  revisiting that decision. Prefer standard semantic types and node rendering.
+- Keep the Markdown reader (`src/markdown`) internal; do not expose parser plugins
+  without an explicit task revisiting that decision. Prefer standard semantic types
+  and node rendering.
 - Read [the exploration backlog](docs/future-exploration.md) before investigating
   Parseman replacement, parser speed claims, or a future extension system. Its
   research questions are not approved migrations or language requirements.

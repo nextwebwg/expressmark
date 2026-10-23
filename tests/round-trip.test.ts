@@ -19,9 +19,10 @@ describe("exact round trips", () => {
       "| a |b|\n|--|:-:|\n| 1 | 2 |\n\n[x]:   /u   'T'\n",
     ]) exact(source, syntax);
   });
-  it("writes the CommonMark and GFM HTML examples back byte for byte", () => {
-    const { sources } = JSON.parse(readFileSync(new URL("./fixtures/html-spec-examples.json", import.meta.url), "utf8")) as { sources: Record<string, { examples: { markdown: string }[] }> };
-    for (const { examples } of Object.values(sources)) for (const { markdown } of examples) for (const syntax of ["compatible", "modern"] as const) exact(markdown, syntax);
+  // Every CommonMark 0.31.2 and GFM 0.29 example, as the specifications publish them.
+  const { sources } = JSON.parse(readFileSync(new URL("./fixtures/spec-examples.json", import.meta.url), "utf8")) as { sources: Record<string, { examples: string[] }> };
+  it.each(Object.entries(sources))("writes every %s example back byte for byte", (_name, { examples }) => {
+    for (const markdown of examples) for (const syntax of ["compatible", "modern"] as const) exact(markdown, syntax);
   });
   it("keeps the unedited blocks and their spacing when one block changes", () => {
     const document = parse("# Title\n\n\n*  one\n*  two\n\n\nLast  line.");
