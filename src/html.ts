@@ -478,6 +478,33 @@ export function readStartTag(source: string, start: number, limit = source.lengt
  * `/>`, and false when `limit` comes first.
  */
 export interface ElementExtent { name: string; tagEnd: number; closeStart: number; end: number; closed: "tag" | "implied" | "void" | "self" | false }
+/**
+ * The end of the first code span or fence between `from` and `before`, when
+ * one starts there: a fence at a line start runs to its closing fence, and a
+ * backtick run to the next run of the same length before a blank line.
+ */
+export function skipCode(source: string, from: number, before: number, limit: number): number | undefined {
+  const tick = /`+|(?:^|\n)[ \t]*~{3,}/g;
+  tick.lastIndex = from;
+  for (let match = tick.exec(source); match && match.index < before; match = tick.exec(source)) {
+    const run = match[0].replace(/^\n?[ \t]*/, "");
+    const lineStart = source.lastIndexOf("\n", match.index + match[0].length - run.length - 1) + 1;
+    const fence = run.length >= 3 && !source.slice(lineStart, match.index + match[0].length - run.length).trim();
+    if (fence) {
+      const close = new RegExp(`\\n[ \\t]*${run[0] === "`" ? "`" : "~"}{${run.length},}[ \\t]*(?=\\n|$)`, "g");
+      close.lastIndex = match.index + match[0].length;
+      const found = close.exec(source);
+      return found && found.index < limit ? found.index + found[0].length : limit;
+    }
+    if (run[0] !== "`") continue;
+    const end = new RegExp(`(?<!\`)\`{${run.length}}(?!\`)`, "g");
+    end.lastIndex = match.index + run.length;
+    const found = end.exec(source);
+    const blank = /\n[ \t]*\n/.exec(source.slice(match.index, found ? found.index : limit));
+    if (found && found.index < limit && !blank) return found.index + run.length;
+  }
+  return;
+}
 export function readElement(source: string, start: number, limit = source.length): ElementExtent | undefined {
   const tag = readStartTag(source, start, limit);
   if (!tag) return;
@@ -500,6 +527,9 @@ export function readElement(source: string, start: number, limit = source.length
   while (cursor < limit) {
     const next = source.indexOf("<", cursor);
     if (next < 0 || next >= limit) break;
+    // Code is opaque: tags inside a code span or fence never count.
+    const code = skipCode(source, cursor, next, limit);
+    if (code !== undefined) { cursor = code; continue; }
     const skip = (terminator: string) => { const close = source.indexOf(terminator, next + 2); return close < 0 ? limit : close + terminator.length; };
     if (source.startsWith("<!--", next)) { cursor = skip("-->"); continue; }
     if (source.startsWith("<![CDATA[", next)) { cursor = skip("]]>"); continue; }

@@ -6,7 +6,7 @@ import type { HtmlAllowlist } from "../src/html.js";
 // Each `modern` case is an example in the Expressive Markdown spec; each
 // `compatible` case is an example in docs/syntax.md, where expressmark follows
 // CommonMark 0.31.2 and GFM.
-const allow: HtmlAllowlist = { tags: ["x-embed", "x-a", "kbd", "select", "option", "script", "textarea", "template"], attributes: { "*": ["video", "src", "type", "href", "align"] } };
+const allow: HtmlAllowlist = { tags: ["x-embed", "x-a", "kbd", "select", "option", "script", "textarea", "template", "style"], attributes: { "*": ["video", "src", "type", "href", "align"] } };
 const normalize = (html: string) => html.replace(/>\s+</g, "><").trim();
 function render(markdown: string, syntax: Syntax = "modern", options: ConversionOptions = {}): string {
   return normalize(renderHtml(parse(markdown, { syntax, trustedHtml: true, ...options }), { trustedHtml: allow }));
@@ -27,20 +27,20 @@ describe("syntax selection", () => {
     expect(parse("Title\n---", { syntax: "modern" }).body.map(node => node.type)).toEqual(["paragraph", "horizontalRule"]);
   });
   it("lets frontmatter choose the syntax, over the host's default", () => {
-    const document = parse("---\nsyntax: modern\n---\nTitle\n---");
+    const document = parse("---\nmarkdownSyntax: modern\n---\nTitle\n---");
     expect(document.syntax).toBe("modern");
     expect(document.metadata).toBeUndefined();
-    expect(parse("---\nsyntax: compatible\n---\nTitle\n---", { syntax: "modern" }).body[0]?.type).toBe("heading");
+    expect(parse("---\nmarkdownSyntax: compatible\n---\nTitle\n---", { syntax: "modern" }).body[0]?.type).toBe("heading");
   });
   it("records the syntax and writes the key when it differs from the host's default", () => {
     const document = parse("Text", { syntax: "modern" });
     expect(document.syntax).toBe("modern");
-    expect(stringify(document)).toBe("---\nsyntax: modern\n---\n\nText\n");
+    expect(stringify(document)).toBe("---\nmarkdownSyntax: modern\n---\n\nText\n");
     expect(stringify(document, { syntax: "modern" })).toBe("Text\n");
   });
   it("keeps an unknown syntax value as metadata, with a diagnostic", () => {
-    expect(codes("---\nsyntax: strict\n---\nText", "compatible")).toContain("invalid-syntax");
-    expect(parse("---\nsyntax: strict\n---\nText").metadata).toEqual({ syntax: "strict" });
+    expect(codes("---\nmarkdownSyntax: strict\n---\nText", "compatible")).toContain("invalid-syntax");
+    expect(parse("---\nmarkdownSyntax: strict\n---\nText").metadata).toEqual({ markdownSyntax: "strict" });
   });
 });
 
@@ -82,6 +82,40 @@ describe("HTML elements", () => {
   it("reads the element nodes in both HTML profiles", () => {
     for (const trustedHtml of [true, false]) expect(parse("<div>A</div>", { syntax: "modern", trustedHtml }).body[0]).toMatchObject({ type: "htmlElement", tag: "div", open: "<div>", close: "</div>" });
     expect(parse("Press <kbd>Ctrl</kbd>", { syntax: "modern", trustedHtml: true }).body[0]?.children?.[1]).toMatchObject({ type: "htmlElement", display: "inline", tag: "kbd", value: "Ctrl" });
+  });
+});
+
+describe("element boundaries", () => {
+  it("ends an unclosed element at its first blank line, at the top level too", () => {
+    expect(render("<div>\nopen\n\nAfter")).toBe("<div>open</div><p>After</p>");
+    expect(render('<a href="x"><img src="y">\n\n# Next')).toBe('<a href="x"><img src="y" /></a><h1>Next</h1>');
+    expect(codes("<div>\nopen\n\nAfter")).toEqual(["unclosed-html-element"]);
+    expect(render("<div>\n```\na\n\nb\n```\nmore\n\nAfter")).toBe("<div><pre><code>a\n\nb</code></pre>\nmore</div><p>After</p>");
+  });
+  it("never counts tags inside code spans or fences when finding an element's end", () => {
+    expect(render("<details>\nUse `</details>` to close.\n</details>\nAfter")).toBe("<details>Use <code>&lt;/details&gt;</code> to close.</details><p>After</p>");
+    expect(render("<details>\n\n```html\n</details>\n```\n\n</details>\nAfter")).toBe('<details><pre><code class="language-html">&lt;/details&gt;</code></pre></details><p>After</p>');
+    expect(render("<div>\n~~~\n</div>\n~~~\n</div>\nAfter")).toBe("<div><pre><code>&lt;/div&gt;</code></pre></div><p>After</p>");
+    expect(render("<div>a `` ` `` b</div>")).toBe("<div>a <code>`</code> b</div>");
+  });
+  it("keeps raw-text elements raw inside a paragraph", () => {
+    const document = parse("Run <script>if (a **b** c) `x` </script> now", { syntax: "modern", trustedHtml: true });
+    expect(document.body[0]?.children?.[1]).toEqual({ type: "htmlElement", display: "inline", tag: "script", open: "<script>", close: "</script>", value: "if (a **b** c) `x` " });
+    expect(render("Use <textarea>*not em*</textarea>.")).toBe("<p>Use <textarea>*not em*</textarea>.</p>");
+    expect(render("a <style>p { x: 1 }")).toBe("<p>a <style>p { x: 1 }</style></p>");
+    expect(codes("a <style>p { x: 1 }")).toEqual(["unclosed-html-element"]);
+    for (const source of ["Run <script>if (a **b** c) `x` </script> now", "Use <textarea>*not em*</textarea>."]) roundTrips(source);
+  });
+});
+
+describe("footnote continuation", () => {
+  const source = "Note[^a].\n\n[^a]: First.\n\n  Second.\nOutside";
+  it("continues a note on lines indented past its marker in modern syntax", () => {
+    expect(render(source)).toContain('<li id="fn:a"><p>First.</p><p>Second.');
+    expect(render(source)).toContain("<p>Outside</p>");
+  });
+  it("continues a note four columns past its marker in compatible syntax", () => {
+    expect(render(source, "compatible")).toContain("<p>Second.\nOutside</p>");
   });
 });
 
