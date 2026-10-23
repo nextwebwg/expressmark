@@ -1,7 +1,7 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
 import { alertMarker, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
-import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeHtml, sanitizeLiteral } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
 import { footnoteDefinitions, linkDefinitions } from "./references.js";
@@ -213,7 +213,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "table") return wrapper("table",`${node.title ? `<caption>${typeof node.title === "object" ? native(node.title):escapeHtml(node.title)}</caption>`:""}${(node.children ?? []).map(native).join("")}`,node.align ? {"data-align":JSON.stringify(node.align)}:{});
     if(node.type === "tableRow") return wrapper("tr",(node.children ?? []).map(native).join(""));
     if(node.type === "tableCell") return wrapper(node.header ? "th":"td",node.body ? node.body.map(native).join("") : kids(),{...(node.colSpan ? {colspan:node.colSpan}:{}),...(node.rowSpan ? {rowspan:node.rowSpan}:{})});
-    if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeHtml(node.value ?? "",options); }
+    if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeFragment(node.value ?? "",options); }
     fail(`Node ${node.type} cannot be represented in a native HTML wrapper.`);
   }
   function safeNative(node: Node): string {
@@ -263,6 +263,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return typeof spaces === "number" && spaces >= 2 && next ? `${" ".repeat(spaces)}\n` : "\\\n";
     }
     if(node.type === "softBreak") { if(attrs) fail("A soft break cannot carry authored attributes in Markdown."); return "\n"; }
+    // A multiline tooltip, as HTML allows, has no Markdown title spelling.
+    if((node.type === "link" || node.type === "image") && typeof node.title === "string" && /[\r\n]/.test(node.title)) return safeNative(node);
     if(node.type === "link" || node.type === "image") {
       const form=spelling(node,"form");
       if(node.type === "link" && form && !attrs && node.title === undefined && node.value !== undefined) {
@@ -313,7 +315,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       if(!footnotes.has(node.label!)) warn(options,"undefined-footnote",`Footnote [^${node.label}] has no definition; it will read back as text.`);
       return `[^${node.label}]`;
     }
-    if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeHtml(node.value ?? "",options); }
+    if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeFragment(node.value ?? "",options); }
     if(node.type === "literal") return escapeText(node.value ?? "");
     fail(`Unsupported inline node: ${node.type}.`);
   }
@@ -516,7 +518,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       const lines=blockArray(node.body ?? []).split("\n");
       return `[^${node.label}]:${lines.map((line,index)=>!line ? "" : index === 0 ? ` ${line}`:`    ${line}`).join("\n")}`;
     }
-    if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeHtml(node.value ?? "",options); }
+    if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeFragment(node.value ?? "",options); }
     if(node.type === "group") return safeNative(node);
     if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeLiteral(node.value ?? "",options); }
     fail(`Unsupported block node: ${node.type}.`);
@@ -527,9 +529,11 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
       return {node,value:block(node,neighboringTabs)};
     }).filter(({value})=>Boolean(value));
-    // A blank line before an item's nested list would loosen the outer list.
+    // A blank line between an item's blocks would loosen its list.
     return blocks.map(({node,value},index)=> {
-      const adjacent=tightList && node.type === "list" && blocks[index-1]?.node.type === "paragraph";
+      // A tight item's blocks touch: a block that interrupts a paragraph follows it directly.
+      const interrupts=["list","blockquote","container","table"].includes(node.type) || node.type === "code" && node.source?.form !== "indented" || node.type === "heading" && node.source?.form !== "setext";
+      const adjacent=tightList && interrupts && blocks[index-1]?.node.type === "paragraph";
       return `${index === 0 ? "" : adjacent ? "\n":"\n\n"}${value}`;
     }).join("");
   }
