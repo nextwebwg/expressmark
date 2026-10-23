@@ -37,6 +37,43 @@ or other agents' CPU-intensive work. Capture more independent paired runs before
 interpreting small differences. A wider corpus is needed for broad performance
 conclusions; see [future exploration](../docs/future-exploration.md).
 
+## Compare two checkouts
+
+`compare.mjs` measures two built expressmark checkouts on the same inputs:
+`--base=<path-or-git-ref>` names the base, and the candidate is this checkout
+unless `--candidate=<path>` names another. A git ref becomes a detached worktree
+under the ignored `work/` directory, installed through the shared pnpm store.
+
+```sh
+git worktree add --detach ../expressmark-bench-base origin/main
+(cd ../expressmark-bench-base && corepack pnpm install --frozen-lockfile && corepack pnpm build)
+corepack pnpm build
+node benchmarks/compare.mjs --base=../expressmark-bench-base > benchmarks/work/compare.json
+node benchmarks/report.mjs benchmarks/work/compare.json
+```
+
+The input sets are the fixtures below, CommonMark 0.31.2's 652 examples and GFM
+0.29's 672, downloaded once into `work/spec/` and checked against pinned digests,
+and a README corpus read from `BENCH_READMES` (default `work/readmes/`).
+`readme-corpus.txt` lists the 400 public repositories the 398-file corpus came
+from; their READMEs are third-party text and stay out of the repository.
+
+For each input set and syntax, one child process imports both builds and runs
+them in alternating order, base then candidate, then candidate then base, for
+`BENCH_ROUNDS` rounds (default 15). Each run repeats whole passes over the set
+for at least `BENCH_DURATION_MS` (default 200), after a `BENCH_WARMUP_MS`
+warmup (default 500). The report gives each side's median, quartiles and
+range, the overall ratio of medians, and the per-round ratios. Memory is
+measured in one child process per build: the heap one pass's documents keep
+alive, and the highest heap a pass reaches. The runner also hashes every parsed
+document and reports how many differ between the builds. It warns when the
+one-minute load average is above 3; run it on an idle machine.
+
+`parity.mjs` takes the same `--base` and `--candidate` and compares everything a
+caller observes: the parsed document, its diagnostics with and without lint,
+its exact writing and its canonical writing, in both syntaxes and both HTML
+profiles. It exits non-zero on any difference.
+
 ## What is compared
 
 | Operation | Implementations | Timed work |

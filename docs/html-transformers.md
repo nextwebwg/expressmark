@@ -170,5 +170,5 @@ HTML templates; sanitization does not replace text escaping. Custom elements,
 forms, SVG and arbitrary CSS are outside the profile.
 
 The public rendering types are `HtmlRenderOptions`, `HtmlTransformer` and
-`HtmlRenderContext`, exported from `expressmark/render`. markdown-it remains an
-internal dependency with no supported plugin/configuration hook.
+`HtmlRenderContext`, exported from `expressmark/render`. The Markdown reader is
+internal, with no supported plugin/configuration hook.

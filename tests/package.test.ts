@@ -26,7 +26,8 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
     expect(installed.repository.url).toBe("git+https://github.com/nextwebwg/expressmark.git");
     expect(installed.repository.directory).toBeUndefined();
     expect(installed.license).toBe("MIT");
-    expect(installed.dependencies).toMatchObject({parseman:"0.55.2", "markdown-it":"15.0.3", "sanitize-html":"2.18.1"});
+    expect(installed.dependencies).toMatchObject({parseman:"0.55.3", "sanitize-html":"2.18.1"});
+    expect(installed.dependencies["markdown-it"]).toBeUndefined();
     expect(readFileSync(join(consumer, "node_modules/expressmark/LICENSE"), "utf8"))
       .toBe(readFileSync(join(root, "LICENSE"), "utf8"));
     const exports = execFileSync(process.execPath, ["--input-type=module", "--eval",
