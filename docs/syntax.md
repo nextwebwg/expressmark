@@ -9,30 +9,32 @@ Expressmark reads Markdown in one of two syntaxes:
 
 ## Choosing the syntax
 
-A document chooses with a frontmatter key, and a host chooses the default for
-documents that set none:
+Set the syntax in configuration: the options object you pass to `parse` and
+`stringify`, or a site generator's config, such as Markupress's
+`markdownSyntax`.
+
+```ts
+const options = { syntax: "modern" } as const;
+const document = parse(source, options);
+const markdown = stringify(document, options);
+```
+
+A document can choose for itself with the frontmatter key `markdownSyntax`,
+which overrides the configuration for that document:
 
 ```md
 ---
-syntax: modern
+markdownSyntax: compatible
 ---
 ```
 
-```ts
-parse(source, { syntax: "modern" });        // the default for this document
-stringify(document, { syntax: "modern" });  // the host's default, for writing
-```
-
-Frontmatter wins over the option. The key's values are `modern` and
-`compatible`; any other value stays ordinary metadata and reports
-`invalid-syntax`. A site generator such as Markupress passes its site-wide
-default as the option.
-
-The document records the syntax that read it as `document.syntax`, which is
-`"modern"` for a `modern` document and the authored value when frontmatter sets
-the key. A document without it is `compatible`. `stringify` writes the
-`syntax` key when the document's syntax differs from the host default it is
-given, and keeps authored frontmatter as written.
+The key's values are `modern` and `compatible`; any other value stays ordinary
+metadata and reports `invalid-syntax`. Inside expressmark's API the option is
+named `syntax`, and the document records the syntax that read it as
+`document.syntax`: `"modern"` for a `modern` document, and the authored value
+when frontmatter sets the key. A document without it is `compatible`.
+`stringify` writes `markdownSyntax` when the document's syntax differs from the
+`syntax` option it is given, and keeps authored frontmatter as written.
 
 ## Where `compatible` follows CommonMark and GFM
 
@@ -97,14 +99,32 @@ CommonMark's do, with indentation counted from the fence's edge. An alert is a
 block quote, so it continues lazily in `compatible` and needs `>` on every line
 in `modern`.
 
+## Moving a document to `modern`
+
+Most documents read the same way in both syntaxes. These readings change as
+the specification intends, and are worth checking when a document moves:
+
+- **`\|` inside a table code span.** GFM authors write `` `a \| b` `` so the pipe
+  stays in its cell. In `modern` a code span is literal, so the backslash shows;
+  write `` `a | b` ``. The `table-code-pipe` [lint rule](lint.md) flags it in
+  `compatible` documents.
+- **A parenthesized phrase after brackets.** `[url](some words)` is a link to
+  `some%20words` in `modern`, since a link target may hold spaces; write
+  `[url]\(some words)` to keep the text.
+- **Indented code, setext headings and trailing-space breaks** read as text, a
+  thematic break and a soft break. The lint rules `prefer-fenced-code`,
+  `prefer-atx-heading` and `prefer-backslash-break` flag them.
+- **Loose lists** split at their blank lines, and **lazy continuation lines**
+  end their quote or list.
+
 ## Diagnostics
 
 | Code | Syntax | Meaning |
 | --- | --- | --- |
-| `invalid-syntax` | both | The frontmatter `syntax` value is not `modern` or `compatible`. |
+| `invalid-syntax` | both | The frontmatter `markdownSyntax` value is not `modern` or `compatible`. |
 | `duplicate-definition` | both | A link reference label is defined more than once. `modern` uses the last definition, `compatible` the first. |
 | `mixed-indentation` | both | A list's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `modern`, and as a [lint rule](lint.md) in `compatible`. |
-| `unclosed-html-element` | `modern` | An element has no closing tag; it ends with its enclosing block. |
+| `unclosed-html-element` | `modern` | An element has no closing tag; it ends at its first blank line, or with its paragraph. |
 | `stray-end-tag` | both | An end tag closes no open element and is ignored. |
 | `br-end-tag` | both | `</br>` is read as `<br>`; write `<br>`. A [lint rule](lint.md). |
 | `html-element-escaped` | both | An element outside the safe HTML profile is shown as text. |

@@ -1,6 +1,6 @@
 import type MarkdownIt from "markdown-it";
 import type { StateBlock, StateInline, Token } from "markdown-it";
-import { rawTextElements, readElement, type ElementExtent } from "./html.js";
+import { rawTextElements, readElement, readStartTag, type ElementExtent } from "./html.js";
 import type { ConversionOptions } from "./types.js";
 import { linting, warn } from "./types.js";
 
@@ -56,6 +56,7 @@ export function installModern(md: InstanceType<typeof MarkdownIt>, lexical: Inst
   if (on("html")) {
     const rule = entry<BlockRule>(block, "html_block")!;
     block.at("html_block", (state, start, end, silent) => htmlElement(state, start, end, silent, options), { alt: [...rule.alt] });
+    md.inline.ruler.before("autolink", "modern_raw_text", (state, silent) => rawText(state, silent, options));
   }
   if (on("spaceBreaks")) {
     // Trailing spaces are insignificant; a break is a trailing backslash or `<br>`.
@@ -279,6 +280,16 @@ function chain(source: string, from: number, limit: number, lineEnd: (offset: nu
     at = extent.end + gap;
   }
 }
+function firstBlank(state: StateBlock, start: number, end: number): number | undefined {
+  let fence: string | undefined;
+  for (let line = start + 1; line < end; line++) {
+    const text = state.src.slice(state.bMarks[line]! + state.tShift[line]!, state.eMarks[line]);
+    const marker = /^(`{3,}|~{3,})/.exec(text)?.[1];
+    if (marker && (!fence || marker[0] === fence[0] && marker.length >= fence.length && !text.slice(marker.length).trim())) fence = fence ? undefined : marker;
+    else if (!fence && state.isEmpty(line)) return line;
+  }
+  return;
+}
 function htmlElement(state: StateBlock, start: number, end: number, silent: boolean, options: ConversionOptions): boolean {
   const pos = state.bMarks[start]! + state.tShift[start]!;
   if (state.src[pos] !== "<") return false;
@@ -313,7 +324,12 @@ function htmlElement(state: StateBlock, start: number, end: number, silent: bool
     // An element ends with its enclosing block, such as a list item.
     for (let line = start + 1; line < end; line++) if (!state.isEmpty(line) && state.sCount[line]! < state.blkIndent) { limit = state.eMarks[line - 1]!; break; }
     const lineEnd = (offset: number) => state.eMarks[lineOf(offset)]!;
-    const found = chain(state.src, pos, limit, lineEnd);
+    let found = chain(state.src, pos, limit, lineEnd);
+    // An element without its end tag ends at its first blank line outside code.
+    if (found?.some(({ extent }) => extent.closed === false)) {
+      const blank = firstBlank(state, start, end);
+      if (blank !== undefined && state.eMarks[blank - 1]! < limit) { limit = state.eMarks[blank - 1]!; found = chain(state.src, pos, limit, lineEnd); }
+    }
     if (!found) return false;
     // An element interrupts a paragraph when it runs past its first line or its
     // start tag ends the line; a one-line element continues the paragraph's text.
@@ -332,7 +348,7 @@ function htmlElement(state: StateBlock, start: number, end: number, silent: bool
     const at = text.indexOf("<");
     for (const { extent, at: begin } of chain(text, at, text.length, offset => { const next = text.indexOf("\n", offset); return next < 0 ? text.length : next; }) ?? []) {
       const tag = text.slice(begin, extent.tagEnd);
-      if (extent.closed === false) warn(options, "unclosed-html-element", `<${extent.name}> has no closing tag; it ends with its enclosing block.`);
+      if (extent.closed === false) warn(options, "unclosed-html-element", `<${extent.name}> has no closing tag; it ends at its first blank line.`);
       const token = state.push("html_element", "", 0);
       token.map = map;
       const inner = text.slice(extent.tagEnd, extent.closeStart);
@@ -346,6 +362,25 @@ function htmlElement(state: StateBlock, start: number, end: number, silent: bool
   state.line = last + 1;
   return true;
 }
+// A raw-text element inside a paragraph holds its content as written, through
+// its end tag or the paragraph's end.
+function rawText(state: StateInline, silent: boolean, options: ConversionOptions): boolean {
+  if (state.src[state.pos] !== "<") return false;
+  const tag = readStartTag(state.src, state.pos, state.posMax);
+  if (!tag || tag.selfClosing || !rawTextElements.has(tag.name)) return false;
+  const close = new RegExp(`</${tag.name}(?=[\\s/>])[^>]*>`, "ig");
+  close.lastIndex = tag.end;
+  const found = close.exec(state.src);
+  const closed = found && found.index + found[0].length <= state.posMax ? found : undefined;
+  if (!silent) {
+    if (!closed) warn(options, "unclosed-html-element", `<${tag.name}> has no closing tag; it ends with its paragraph.`);
+    const token = state.push("html_raw_inline", "", 0);
+    token.meta = { name: tag.name, open: state.src.slice(state.pos, tag.end), value: state.src.slice(tag.end, closed ? closed.index : state.posMax), ...(closed ? { close: closed[0] } : {}) };
+  }
+  state.pos = closed ? closed.index + closed[0].length : state.posMax;
+  return true;
+}
+
 // A link or image target holding spaces: it runs to the `)` that balances the
 // opening one on the same line, and a final quoted title stays the title.
 function spacedTarget(state: StateInline, silent: boolean, image: boolean): boolean {

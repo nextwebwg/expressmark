@@ -3,7 +3,7 @@ import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
-import { htmlNodes, normalizeTags, parentEndCloses, rawTextElements, readStartTag, sanitizeFragment, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
+import { htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installModern, modernRules, type ModernRule } from "./modern.js";
 import type { ConversionOptions, Document, Json, Node, Position, Syntax } from "./types.js";
@@ -170,7 +170,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     footnotes.add(match[1]!);
     const opened=state.push("footnote_open","",1); opened.meta={label:match[1]}; opened.map=[start,start+1];
     // Read the note like a list item: its first line starts after the marker,
-    // and its continuation lines are indented four columns past the marker.
+    // and its continuation lines are indented four columns past the marker, or
+    // in `modern` syntax, past the marker by any amount, as list nesting is.
     const saved={bMark:state.bMarks[start]!,tShift:state.tShift[start]!,sCount:state.sCount[start]!,parentType:state.parentType};
     let position=begin+match[0].length;
     const contentStart=position;
@@ -183,12 +184,13 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.tShift[start]=position-contentStart;
     state.sCount[start]=offset-initial;
     state.bMarks[start]=contentStart;
-    state.blkIndent+=4;
+    const outer=state.blkIndent;
+    state.blkIndent=modern.has("relativeLists") ? saved.sCount+1 : outer+4;
     state.parentType="footnote" as typeof state.parentType;
     if(state.sCount[start]! < state.blkIndent) state.sCount[start]!+=state.blkIndent;
     state.md.block.tokenize(state,start,end);
     state.parentType=saved.parentType;
-    state.blkIndent-=4;
+    state.blkIndent=outer;
     state.tShift[start]=saved.tShift; state.sCount[start]=saved.sCount; state.bMarks[start]=saved.bMark;
     state.push("footnote_close","",-1);
     return true;
@@ -418,10 +420,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       const inner=/^<[A-Za-z]/.test(content) ? readStartTag(content,0) : undefined;
       if(inner && open.start(inner.name,inner.selfClosing)) { implied=true; break; }
     }
-    if(closed<0 && !implied && !parentEndCloses.has(tag.name)) warn(options,"unclosed-html-element",`<${tag.name}> has no closing tag; it ends with its enclosing block.`);
+    if(closed<0 && !implied && !parentEndCloses.has(tag.name)) warn(options,"unclosed-html-element",`<${tag.name}> has no closing tag; it ends with its paragraph.`);
     const inner=tokens.slice(at+1,index);
-    const slot=rawTextElements.has(tag.name) ? {value:inner.map(token=>token.content).join("")} : {children:inlineTokens(inner,lineBlock)};
-    return {nodes:elementNodes(tag.name,raw,closed<0 ? undefined:tokens[closed]!.content,"inline",slot),next:closed<0 ? index:closed+1};
+    return {nodes:elementNodes(tag.name,raw,closed<0 ? undefined:tokens[closed]!.content,"inline",{children:inlineTokens(inner,lineBlock)}),next:closed<0 ? index:closed+1};
   }
   function inlineTokens(tokens: Token[], lineBlock = false): Node[] {
     let cursor=0;
@@ -464,6 +465,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const node=compact({type},read(token.type.replace("_open","_close")));
           if(token.markup.startsWith("_")) spell(node,"marker","_");
           nodes.push(node);
+        } else if(token.type === "html_raw_inline") {
+          const meta=token.meta as {name:string;open:string;close?:string;value:string};
+          nodes.push(...elementNodes(meta.name,meta.open,meta.close,"inline",{value:meta.value}));
         } else if(token.type === "html_inline" && modern.has("html")) { const found=inlineElement(tokens,cursor-1,lineBlock); nodes.push(...found.nodes); cursor=found.next; }
         else if(token.type === "html_inline" && options.trustedHtml) { if(/^<\/br[\s>]/i.test(token.content)) if(linting(options.lint,"br-end-tag")) options.onDiagnostic?.({code:"br-end-tag",message:"</br> is read as <br>; write <br>.",severity:"warning",preferred:"<br>"}); nodes.push({type:"html",display:"inline",value:token.content}); }
         else if(token.type === "html_inline") {
@@ -800,9 +804,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(map.title !== undefined && typeof map.title !== "string") throw new Error("Frontmatter title must be a string.");
       if(map.description !== undefined && typeof map.description !== "string") throw new Error("Frontmatter description must be a string.");
       if(map.tags !== undefined && (!Array.isArray(map.tags) || !map.tags.every(tag=>typeof tag === "string"))) throw new Error("Frontmatter tags must be a string list.");
-      if(map.syntax !== undefined) {
-        if(map.syntax === "modern" || map.syntax === "compatible") { frontSyntax=map.syntax; delete map.syntax; }
-        else warn(options,"invalid-syntax","Frontmatter syntax must be modern or compatible; it was kept as metadata.");
+      if(map.markdownSyntax !== undefined) {
+        if(map.markdownSyntax === "modern" || map.markdownSyntax === "compatible") { frontSyntax=map.markdownSyntax; delete map.markdownSyntax; }
+        else warn(options,"invalid-syntax","Frontmatter markdownSyntax must be modern or compatible; it was kept as metadata.");
       }
       if(typeof map.id === "string") { document.id=map.id; delete map.id; }
       if(typeof map.title === "string") { documentTitle=map.title; delete map.title; }

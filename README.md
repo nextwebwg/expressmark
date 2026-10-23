@@ -109,8 +109,9 @@ rendering is available from 0.1.2.
 - Two syntaxes: `compatible`, the default, reads CommonMark 0.31.2 and GFM
   blocks and inline content, including tables, tasks, strikethrough and
   autolinks; `modern` reads the Expressive Markdown specification, with
-  Markdown inside HTML elements and no indented code. A frontmatter `syntax`
-  key or the `syntax` option chooses; see [syntax](docs/syntax.md).
+  Markdown inside HTML elements and no indented code. The `syntax` option
+  chooses, and a document's `markdownSyntax` frontmatter overrides it; see
+  [syntax](docs/syntax.md).
 - Lint warnings for spellings other than the preferred form, and a writer
   option that writes the preferred form; see [lint](docs/lint.md).
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.

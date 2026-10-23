@@ -582,8 +582,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     metadata.title=caption({type:"document",title:document.title});
   }
   if(document.attributes && Object.keys(document.attributes).length) fail("Root attributes have no core frontmatter mapping.");
-  // A syntax other than the host's default is written as the `syntax` key.
-  if(document.syntax !== undefined && document.syntax !== (options.syntax ?? "compatible")) metadata.syntax=document.syntax;
+  // A syntax other than the host's default is written as the `markdownSyntax` key.
+  if(document.syntax !== undefined && document.syntax !== (options.syntax ?? "compatible")) metadata.markdownSyntax=document.syntax;
   const authoredYaml=spelling(document,"frontmatter");
   const keepYaml=authoredYaml !== undefined && reads(`---\n${authoredYaml}\n---\n`,{type:"document",body:[],...(document.id !== undefined ? {id:document.id}:{}),...(document.title !== undefined ? {title:document.title}:{}),...(document.metadata ? {metadata:document.metadata}:{}),...(document.syntax ? {syntax:document.syntax}:{})} as Node,parsed=>({...parsed,version:undefined,body:[]} as unknown as Node),"frontmatter",document);
   const head=keepYaml ? `---\n${authoredYaml}\n---\n\n` : Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";
