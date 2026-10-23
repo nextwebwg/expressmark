@@ -41,8 +41,41 @@
 - Keep a list table's rows in one table when blank lines separate them.
 - Add `BENCH_SYNTAX` to the benchmark suite.
 
+## 0.1.14
+
+- Open a container for every colon fence. A header without a type, such as
+  `::: {.render}`, `::: [Title]` or a bare `:::`, gives a generic container
+  with no `subType`, rendered as a `<div>` with its attributes. An unreadable
+  header keeps the type it names, with `source.rest` holding the remainder,
+  and reports `invalid-container-header`.
+- Keep a stray bare `:::` with no closing line as a `strayFence` node: it
+  renders nothing, round-trips and reports `stray-fence`, and never encloses
+  following content. A bare fence closes only before any other opening fence
+  of its length or longer.
+- Run an unclosed container to the end of its enclosing block, or to a longer
+  fence, reporting `unclosed-container`, in place of literal recovery.
+- Strip a fence's own indentation from the lines it encloses, as for code fences.
+- Accept `.class` shorthand in attribute lists. Shorthands accumulate into
+  `class`; an assigned `class=` replaces them, and a later list's shorthands
+  add to an earlier one's. A class never becomes a container type.
+  This also fixes 0.1.8's reading of `::: note Title {.x}`: the title is
+  "Title" and `.x` a class.
+- End a container with its enclosing block, such as a list item.
+- Read bracketed spans, `[text]{attributes}`, as typeless `inline` nodes when
+  the bracket is not a link, rendered as `<span>` with their attributes. Links
+  and resolving references keep their lists; `![…]`, `@[…]`, `:name[…]` and
+  `[^…]` keep their own readings, as does a bracket right after `]` in a
+  reference form; an escaped `\!`, `\@` or `\:` leaves the bracket a span. A
+  span inside link text stays inside the link. Literal span-shaped text is
+  protected.
+- Write classes as `.class` and IDs as `#id`, the spec's preferred spellings,
+  as in `{.wide #intro}`, unless a value needs quoting. Authored `class=` and
+  `id=` spellings work the same and are kept.
+
 ## 0.1.13
 
+- Keep a link reference definition whose title spans lines; `parse` threw
+  "An attribute value cannot contain a newline or NUL" (CommonMark example 196).
 - Parse every README in a 398-document corpus of popular projects, and write
   each one back, in both HTML profiles.
 - Advance past a mention, directive or attribute list matched while a link's

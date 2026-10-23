@@ -4,7 +4,7 @@ import { ConversionError, warn } from "./types.js";
 
 const identifier = regex(/[A-Za-z][A-Za-z0-9_-]*/);
 const handle = regex(/[\p{L}\p{N}_][\p{L}\p{M}\p{N}_-]*/u);
-const entry = regex(/(?:#[^\s&{}]+|!?[A-Za-z][A-Za-z0-9_-]*(?:=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s&{}"']+))?)/);
+const entry = regex(/(?:#[^\s&{}]+|\.[A-Za-z_-][\w-]*|!?[A-Za-z][A-Za-z0-9_-]*(?:=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s&{}"']+))?)/);
 // `> [!type] Title` opens an alert: the marker is followed by a space, tab or line end.
 export const alertMarker=/^\[!([A-Za-z][A-Za-z0-9_-]*)\](?:[ \t]+([^\n]*))?[ \t]*(?:\n|$)/;
 // Recognized structural types keep the colon form; an alert names a callout.
@@ -24,7 +24,8 @@ export function attributeKey(key: string): string {
   return key.toLowerCase().split("-").filter(Boolean).map((part, i) => i ? part.replace(/^[a-z]/, c => c.toUpperCase()) : part).join("");
 }
 export function sourceKey(key: string): string { return key.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`); }
-export interface AttributeResult { length: number; id?: string; attributes: Attributes }
+/** `replacesClass`: an assigned `class=` set the list's class, rather than shorthands adding to it. */
+export interface AttributeResult { length: number; id?: string; attributes: Attributes; replacesClass?: boolean }
 export function readAttributes(source: string, options: ConversionOptions = {}): AttributeResult | undefined {
   if (source[0] !== "{" || /[ \t]/.test(source[1] ?? "")) return;
   let cursor = 1;
@@ -39,6 +40,19 @@ export function readAttributes(source: string, options: ConversionOptions = {}):
     let key: string;
     let value: string | boolean;
     if (raw.startsWith("#")) { key = "id"; value = raw.slice(1); }
+    else if (raw.startsWith(".")) {
+      // Class shorthands accumulate; they never conflict with one another.
+      const existing = result.attributes.class;
+      result.attributes.class = typeof existing === "string" && existing ? `${existing} ${raw.slice(1)}` : raw.slice(1);
+      seen.add("class");
+      cursor += parsed.span.end;
+      if (source[cursor] === "}") break;
+      const separator = /^[ \t&]+/.exec(source.slice(cursor));
+      if (!separator) return;
+      cursor += separator[0].length;
+      if (source[cursor] === "}") return;
+      continue;
+    }
     else if (equal >= 0) {
       key = attributeKey(raw.slice(0, equal));
       const assigned = raw.slice(equal + 1);
@@ -50,6 +64,7 @@ export function readAttributes(source: string, options: ConversionOptions = {}):
       if (typeof value !== "string") return;
       result.id = value;
     } else result.attributes[key] = value;
+    if (key === "class") result.replacesClass = true;
     cursor += parsed.span.end;
     if (source[cursor] === "}") break;
     const separator = /^[ \t&]+/.exec(source.slice(cursor));
@@ -63,7 +78,11 @@ export function readAttributes(source: string, options: ConversionOptions = {}):
 }
 export function attach(node: Node, result: AttributeResult): void {
   if (result.id !== undefined) node.id = result.id;
-  if (Object.keys(result.attributes).length) node.attributes = { ...node.attributes, ...result.attributes };
+  if (!Object.keys(result.attributes).length) return;
+  const previous = node.attributes?.class;
+  node.attributes = { ...node.attributes, ...result.attributes };
+  // A later list's class shorthands add to the classes gathered so far.
+  if (typeof previous === "string" && previous && typeof result.attributes.class === "string" && !result.replacesClass) node.attributes.class = `${previous} ${result.attributes.class}`;
 }
 export function readLabel(source: string): { value: string; length: number } | undefined {
   if (source[0] !== "[") return;
@@ -111,9 +130,10 @@ export function trailingAttributeLists(text: string, options: ConversionOptions 
 export function readHeader(source: string, options: ConversionOptions = {}, unbracketed = false): Node | undefined {
   let cursor = /^[ \t]*/.exec(source)![0].length;
   const name = tokenIdentifier(source.slice(cursor));
-  if (!name) return;
-  cursor += name.length;
-  const node: Node = {type:"container", subType:name.toLowerCase(), body:[]};
+  // A container header may omit its type: a generic container.
+  if (!name && !unbracketed) return;
+  cursor += name?.length ?? 0;
+  const node: Node = name ? {type:"container", subType:name.toLowerCase(), body:[]} : {type:"container", body:[]};
   while (cursor < source.length) {
     cursor += /^[ \t]*/.exec(source.slice(cursor))![0].length;
     if (cursor === source.length) break;
@@ -123,7 +143,7 @@ export function readHeader(source: string, options: ConversionOptions = {}, unbr
       if (!label) return;
       node.title = {type:"title", value:label.value};
       cursor += label.length;
-    } else if (source[cursor] === "{" || !unbracketed || node.title) {
+    } else if (source[cursor] === "{" || !unbracketed || node.title || !name) {
       const attrs = readAttributes(source.slice(cursor), options);
       if (!attrs) return;
       attach(node, attrs); cursor += attrs.length;
@@ -145,7 +165,11 @@ export function writeAttributes(node: Node, extra: Attributes = {}): string {
   const entries = { ...node.attributes, ...extra };
   const output: string[] = [];
   if (node.id !== undefined && /[\r\n]/.test(node.id)) throw new ConversionError("unsupported-conversion","A node attachment ID must fit on one source line.");
-  if (node.id !== undefined) output.push(`id=${quoteAttribute(node.id)}`);
+  // `.class` and `#id` are the preferred spellings; a value the shorthand cannot hold is assigned.
+  const short = (value: string) => /^[^\s&{}"'=]+$/.test(value);
+  const classes = typeof entries.class === "string" ? entries.class.split(/\s+/).filter(Boolean) : undefined;
+  if (classes?.length && classes.every(short)) { output.push(...classes.map(name => `.${name}`)); delete entries.class; }
+  if (node.id !== undefined) output.push(short(node.id) ? `#${node.id}` : `id=${quoteAttribute(node.id)}`);
   for (const [key, value] of Object.entries(entries)) {
     const name = sourceKey(key);
     output.push(typeof value === "boolean" ? `${value ? "" : "!"}${name}` : `${name}=${quoteAttribute(value)}`);
