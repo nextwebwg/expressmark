@@ -2,7 +2,7 @@ import type MarkdownIt from "markdown-it";
 import type { StateBlock, StateInline, Token } from "markdown-it";
 import { rawTextElements, readElement, readStartTag, type ElementExtent } from "./html.js";
 import type { ConversionOptions } from "./types.js";
-import { warn } from "./types.js";
+import { linting, warn } from "./types.js";
 
 /** The rules `modern` syntax changes; `compatible` syntax keeps CommonMark and GFM's. */
 export const modernRules = ["html","indentedCode","setext","spaceBreaks","tableCode","lazy","bullets","spacedTargets","relativeLists","looseLists","lastDefinition"] as const;
@@ -310,7 +310,7 @@ function htmlElement(state: StateBlock, start: number, end: number, silent: bool
     if (silent) return true;
     if (closing[1]!.toLowerCase() === "br") {
       // Authors write </br> to mean a line break.
-      warn(options, "br-end-tag", "</br> is read as <br>; write <br>.");
+      if (linting(options.lint, "br-end-tag")) options.onDiagnostic?.({ code: "br-end-tag", message: "</br> is read as <br>; write <br>.", severity: "warning", preferred: "<br>" });
       const token = state.push("html_element", "", 0);
       token.map = [start, start + 1]; token.meta = { name: "br", open: closing[0] };
     } else {

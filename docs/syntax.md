@@ -123,8 +123,8 @@ the specification intends, and are worth checking when a document moves:
 | --- | --- | --- |
 | `invalid-syntax` | both | The frontmatter `markdownSyntax` value is not `modern` or `compatible`. |
 | `duplicate-definition` | both | A link reference label is defined more than once. `modern` uses the last definition, `compatible` the first. |
-| `mixed-indentation` | `modern` | A list's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. |
+| `mixed-indentation` | both | A list's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `modern`, and as a [lint rule](lint.md) in `compatible`. |
 | `unclosed-html-element` | `modern` | An element has no closing tag; it ends at its first blank line, or with its paragraph. |
 | `stray-end-tag` | both | An end tag closes no open element and is ignored. |
-| `br-end-tag` | both | `</br>` is read as `<br>`; write `<br>`. |
+| `br-end-tag` | both | `</br>` is read as `<br>`; write `<br>`. A [lint rule](lint.md). |
 | `html-element-escaped` | both | An element outside the safe HTML profile is shown as text. |

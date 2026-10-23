@@ -4,6 +4,7 @@ import { alertMarker, destination, diagnoseIds, normalizeLabel, readAttributes, 
 import { escapeHtml, rawTextElements, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
+import { preferForms } from "./lint.js";
 import { footnoteDefinitions, linkDefinitions } from "./references.js";
 import { tableGrid, transposeTable } from "./tables.js";
 import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
@@ -131,6 +132,8 @@ function validateMetadata(value: unknown, ancestors=new Set<unknown>()): void {
 
 export function stringify(document: Document, options: ConversionOptions = {}): string {
   document=normalizeAbsence(document) as Document;
+  // The copies drop each spelling the lint rules flag, so the preferred form is written.
+  if(options.preferredForms) preferForms(document);
   if(document?.type !== "document" || document.version !== 1 || !Array.isArray(document.body)) throw new ConversionError("unsupported-version","Expected a document with version 1 and a body array.");
   validate(document);
   if(document.metadata !== undefined) {

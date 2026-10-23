@@ -112,6 +112,8 @@ rendering is available from 0.1.2.
   Markdown inside HTML elements and no indented code. The `syntax` option
   chooses, and a document's `markdownSyntax` frontmatter overrides it; see
   [syntax](docs/syntax.md).
+- Lint warnings for spellings other than the preferred form, and a writer
+  option that writes the preferred form; see [lint](docs/lint.md).
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
 - Nested colon containers, typeless generic containers, inline/leaf directives, open semantic types and shared string/flag attributes, including `#id` and `.class` shorthand.
 - Bracketed spans, `[text]{.note}`, for inline text with attributes. The longhand `{class="note" id="x"}` works the same as `{.note #x}`.

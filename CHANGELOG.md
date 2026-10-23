@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.16
+
+- Add lint warnings for spellings other than the preferred form: `parse` with
+  `lint: true`, or a map of rule codes, reports each with its `code`, the
+  `preferred` form and the `position` of the block that holds it. See
+  [lint](docs/lint.md).
+- Add `preferredForms` to `stringify`, which writes the preferred form of every
+  spelling the lint rules flag.
+- Report `mixed-indentation` in `compatible` lists as a lint rule, and
+  `br-end-tag` as a lint rule in both syntaxes.
+- Add the `table-code-pipe` lint rule, which flags `\|` inside a table code span
+  in `compatible`, where `modern` keeps the backslash.
+
 ## 0.1.15
 
 - Add the `modern` syntax, the Expressive Markdown specification, beside
