@@ -20,6 +20,7 @@
 - Show authored HTML outside the safe profile as text, as GitHub's tag filter
   does, in place of removing it, and accept `picture` and `source`.
 - Report `duplicate-definition` for a link label defined more than once.
+- Keep a list table's rows in one table when blank lines separate them.
 - Add `BENCH_SYNTAX` to the benchmark suite.
 
 ## 0.1.13

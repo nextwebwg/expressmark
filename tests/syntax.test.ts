@@ -277,6 +277,12 @@ describe("blank lines in lists", () => {
   });
 });
 
+describe("list tables", () => {
+  it("keeps rows separated by blank lines in one table in both syntaxes", () => {
+    for (const syntax of ["modern", "compatible"] as const) expect(render("::: table\n- Name: Ada\n  Role: Math\n\n- Name: Alan\n  Role: Logic\n:::", syntax)).toBe("<table><tr><th>Name</th><th>Role</th></tr><tr><td>Ada</td><td>Math</td></tr><tr><td>Alan</td><td>Logic</td></tr></table>");
+  });
+});
+
 describe("duplicate link definitions", () => {
   const source = "[x]\n\n[x]: /one\n[x]: /two";
   it("uses the last definition in modern syntax and the first in compatible syntax", () => {
@@ -286,5 +292,35 @@ describe("duplicate link definitions", () => {
   it("reports the duplicate label in both syntaxes", () => {
     expect(codes(source)).toEqual(["duplicate-definition"]);
     expect(codes(source, "compatible")).toEqual(["duplicate-definition"]);
+  });
+});
+
+// The spec's examples, verbatim, in `modern` syntax.
+describe("spec examples", () => {
+  it.each([
+    ['<div class="entry">\nSome **bold** text.\n</div>', '<div class="entry">Some <strong>bold</strong> text.</div>'],
+    ["<details><summary>Notes</summary><div>\n\nBody\n\n</div></details>", "<details><summary>Notes</summary><div><p>Body</p></div></details>"],
+    ['Text\n<a href="/x">link</a>\n\nText\n<div>\nBlock\n</div>', '<p>Text\n<a href="/x">link</a></p><p>Text</p><div>Block</div>'],
+    ["<ul><li>a<li>b</ul>\n\n<table>\n<tr><td>a<td>b\n<tr><td>c\n</table>", "<ul><li>a</li><li>b</li></ul><table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>"],
+    ["a </span> b\n\nline one</br>\nline two", "<p>a  b</p><p>line one<br />\nline two</p>"],
+    ['<a href=/docs/>Docs</a>', '<a href="/docs/">Docs</a>'],
+    ["    const x = 1;\n\n    # Title", "<p>const x = 1;</p><h1>Title</h1>"],
+    ["Title\n---\n\nTitle\n===", "<p>Title</p><hr /><p>Title\n===</p>"],
+    ["one  \ntwo\n\none\\\ntwo", "<p>one\ntwo</p><p>one<br />two</p>"],
+    ["| Expression | Reads |\n| --- | --- |\n| `a || b` | or |\n| x \\| y | either |", "<table><tr><th>Expression</th><th>Reads</th></tr><tr><td><code>a || b</code></td><td>or</td></tr><tr><td>x | y</td><td>either</td></tr></table>"],
+    ["> quoted\nnot quoted\n\n- item\nnot item", "<blockquote><p>quoted</p></blockquote><p>not quoted</p><ul><li>item</li></ul><p>not item</p>"],
+    ["- a\n* b\n+ c\n\n1. one\n2) two", "<ul><li>a</li><li>b</li><li>c</li></ul><ol><li>one</li><li>two</li></ol>"],
+    ["- a\n - b\n- c", "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>"],
+    ["- a\n- b\n\n- c\n\n- a\n\n  more\n- b\n\n1. one\n2. two\n\n3. three", '<ul><li>a</li><li>b</li></ul><ul><li>c</li></ul><ul><li><p>a</p><p>more</p></li><li>b</li></ul><ol><li>one</li><li>two</li></ol><ol start="3"><li>three</li></ol>'],
+    ['[Notes](my notes.md)\n[Draft](notes (draft).md "Draft") and [Next](next.md)\n![Chart](my chart.png)', '<p><a href="my%20notes.md">Notes</a><a href="notes%20(draft).md" title="Draft">Draft</a> and <a href="next.md">Next</a><img src="my%20chart.png" alt="Chart" /></p>'],
+    ["[x]\n\n[x]: /one\n[x]: /two", '<p><a href="/two">x</a></p>'],
+  ])("%s", (source, html) => expect(render(source)).toBe(html));
+  it("reads <u> and <mark> as element nodes", () => {
+    expect(parse("<u>Underlined</u> and <mark>highlighted</mark> text.", { syntax: "modern" }).body[0]).toEqual({ type: "paragraph", children: [
+      { type: "htmlElement", display: "inline", tag: "u", open: "<u>", close: "</u>", value: "Underlined" },
+      { type: "text", value: " and " },
+      { type: "htmlElement", display: "inline", tag: "mark", open: "<mark>", close: "</mark>", value: "highlighted" },
+      { type: "text", value: " text." },
+    ] });
   });
 });
