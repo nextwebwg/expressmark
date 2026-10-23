@@ -63,6 +63,13 @@ describe("lint rules", () => {
     expect(warnings("- a\n* b", "modern").map(diagnostic => diagnostic.code)).toEqual(["prefer-list-bullet"]);
     expect(preferred("- a\n* b", "modern")).toBe("- a\n- b\n");
   });
+  it("flags \\| inside a table code span in compatible syntax", () => {
+    const table = "| Command | Use |\n| --- | --- |\n| `a \\| b` | either |";
+    const pipes = (source: string, syntax: Syntax = "compatible") => warnings(source, syntax).filter(diagnostic => diagnostic.code === "table-code-pipe");
+    expect(pipes(table)).toEqual([expect.objectContaining({ code: "table-code-pipe", position: { start: { line: 1, column: 1 }, end: { line: 3, column: 22 } } })]);
+    expect(pipes(table, "modern")).toEqual([]);
+    expect(pipes("| a | b |\n| --- | --- |\n| x \\| y | z |")).toEqual([]);
+  });
   it("writes authored spellings back without preferredForms", () => {
     expect(stringify(parse("* _a_"))).toBe("* _a_\n");
   });

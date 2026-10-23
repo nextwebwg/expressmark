@@ -10,6 +10,8 @@
   spelling the lint rules flag.
 - Report `mixed-indentation` in `compatible` lists as a lint rule, and
   `br-end-tag` as a lint rule in both syntaxes.
+- Add the `table-code-pipe` lint rule, which flags `\|` inside a table code span
+  in `compatible`, where `modern` keeps the backslash.
 
 ## 0.1.15
 

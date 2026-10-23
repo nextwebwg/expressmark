@@ -742,6 +742,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(alignment.some(Boolean)) table.align=alignment;
           const originalRows=token.map ? original.split("\n").slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(splitRow) : rawCells;
           const hasMerges=originalRows.some(row=>row.some(cell=>/^[>^]$/.test(cell.trim())));
+          // Lint: `\|` in a cell's code span, which `modern` syntax keeps as written.
+          if(token.map && original === source && !modern.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(original.split("\n").slice(token.map[0],token.map[1]).join("\n")))
+            options.onDiagnostic?.({code:"table-code-pipe",message:"A code span in this table writes \\| for a pipe; in modern syntax the backslash shows, so write |.",severity:"warning",preferred:"| inside the code span",position:{start:{line:token.map[0]+lineOffset+1,column:1},end:{line:token.map[1]+lineOffset,column:lineAt(token.map[1]-1).length+1}}});
           const invalid=hasMerges && originalRows.some(row=>row.length !== (rows[0]?.children?.length ?? 0)) ? "Merged tables require every authored row to supply the same column count." : mergeTable(table,rawCells);
           if(invalid) {
             const range=token.map;

@@ -53,12 +53,20 @@ Without `preferredForms`, `stringify` writes each authored spelling back.
 | `prefer-canonical-line-block` | Line-block marker spacing or continuation lines | `\| ` lines |
 | `mixed-indentation` | A list mixing tabs and spaces, in `compatible` (always reported in `modern`) | one kind of indentation |
 | `br-end-tag` | `</br>`, read as `<br>` | `<br>` |
+| `table-code-pipe` | `\|` inside a table cell's code span, in `compatible`; `modern` keeps the backslash | `\|` written as `|` inside the code span |
 
 Longhand attributes, `{class="…" id="…"}`, work the same as `{.class #id}` and
 have no rule, and a typeless container such as `::: {.render}` is a preferred
 form. A list right after another list keeps the bullet that separates them, so
 it has no warning. Conversion-only spellings, such as `:mention` and
 `== Label`, are not accepted spellings and have no rule.
+
+## Accepted readings in `modern`
+
+Two readings change on purpose when a document moves to `modern`, as
+[syntax](syntax.md#moving-a-document-to-modern) describes: `\|` inside a table
+code span shows its backslash, which `table-code-pipe` flags, and
+`[url](some words)` is a link to `some%20words`.
 
 ## Follow-up: migrating to `modern`
 
