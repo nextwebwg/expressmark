@@ -1,5 +1,208 @@
 import { expect, it } from "vitest";
-import { parse, stringify } from "../src/index.js";
+import { parse, stringify, type Document } from "../src/index.js";
+import { semantic } from "./semantic.js";
+
+it.each([
+  "The range is [-1, 1], with an unmatched [ or ].",
+  "Set {name}; x < 5, x > 2; a | b; ~5; a * b.",
+  "An unmatched ` backtick and trailing underscore_.",
+  "An @ sign, a@word, a@[label], (@word) and /@word.",
+  "#hashtag, +5, -5 and =value are ordinary text.",
+  "A \\q path and &unknownentity; stay literal.",
+  "Status: ready. Meet at 10:30; use snake_case.",
+  "+5 is positive.", "-5 is negative.", "=value is an assignment.", "=", "===", "--",
+  "[x] is ordinary paragraph text.",
+])("writes literal prose without redundant punctuation escapes: %s", value => {
+  const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+  expect(parse(value)).toEqual(document);
+  expect(stringify(document)).toBe(`${value}\n`);
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it("uses the enclosing block context for literal punctuation",()=> {
+  for(const value of ["1. item", "- item", "# heading", "| line"]) {
+    const heading: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
+    expect(stringify(heading)).toBe(`## ${value}\n`);
+    expect(parse(stringify(heading))).toEqual(heading);
+    const line: Document={type:"document",version:1,body:[{type:"lineBlock",value}]};
+    expect(stringify(line)).toBe(`| ${value}\n`);
+    expect(parse(stringify(line))).toEqual(line);
+  }
+  const source="- Clamp to [-1, 1]; use {name}, a@word and a | b.";
+  expect(stringify(parse(source))).toBe(source);
+});
+
+it("keeps unmatched backticks literal inside directive labels and titles",()=> {
+  for(const source of [":chip[Use ` literally]", "::: note [Use ` literally]\nBody.\n:::"]) {
+    const document=parse(source);
+    expect(JSON.stringify(document)).toContain('"subType":');
+    expect(stringify(document)).toBe(source);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  const document: Document={type:"document",version:1,title:{type:"title",value:"Unmatched [ range"},body:[]};
+  expect(stringify(document)).not.toContain("\\[");
+  expect(semantic(parse(stringify(document)))).toEqual(document);
+  const code=parse(":chip[`a\\`]");
+  expect(code.body[0]?.children?.[0]?.children).toEqual([{type:"inlineCode",value:"a\\"}]);
+  expect(parse(stringify(code))).toEqual(code);
+});
+
+it("keeps syntax-shaped literal text literal in its full writing context",()=> {
+  for(const value of [
+    "*literal* and a * b", "_literal_ and underscore_", "~~literal~~ and ~5",
+    "`literal` and an unmatched ``", "[label](target)", "[[label](target)", "![alt](image.png)",
+    "<b>literal</b> and x < 5", "<https://example.test>", "&copy; and &#65;",
+    ":chip[Ready]{tone=green}", ":chip[a\\]", "@[a\\]", ':chip{a="x\\"}',
+    "@[Ada] and @ada", "# heading", "+ item", "- item",
+    "1. item", "2) item", "---", "a\n===", "| line", "::toc", "::: note", "a | b\n:-- | --:",
+  ]) {
+    const paragraph=value.includes("\n") ? {type:"paragraph",children:value.split("\n").flatMap((line,index)=>[
+      ...(index ? [{type:"softBreak"}]:[]),{type:"text",value:line},
+    ])}:{type:"paragraph",value};
+    const document: Document={type:"document",version:1,body:[paragraph]};
+    expect(parse(stringify(document)),value).toEqual(document);
+  }
+  for(const checked of ["x", " "]) {
+    const document: Document={type:"document",version:1,body:[{type:"list",ordered:false,tight:true,children:[
+      {type:"listItem",body:[{type:"paragraph",value:`[${checked}] literal task marker`}]},
+    ]}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("preserves punctuation where inline nodes meet or nest",()=> {
+  const mention={type:"inline",subType:"mention",value:"Ada"};
+  const nodes=[
+    [{type:"text",value:"@"},{type:"link",value:"label",url:"target"}],
+    [{type:"text",value:"["},{type:"strong",value:"label"},{type:"text",value:"](target)"}],
+    [{type:"link",value:"label",url:"target"},{type:"text",value:"{name}"}],
+    [{type:"text",value:"("},mention,{type:"text",value:")"}],
+    [{type:"strong",children:[mention]}],
+    [{type:"link",children:[mention],url:"target"}],
+    [{type:"text",value:"~"},{type:"delete",value:"word"}],
+    [{type:"strong",value:"*"}],
+    [{type:"delete",value:"~"}],
+  ];
+  for(const children of nodes) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",children}]};
+    expect(parse(stringify(document)),JSON.stringify(children)).toEqual(document);
+  }
+  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"a * b and @word"}]}]})).toBe("**a * b and \\@word**\n");
+  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"@word"}]}]})).toBe("**@word**\n");
+  expect(stringify({type:"document",version:1,body:[{type:"heading",level:2,value:"Set {name} today"}]})).toBe("## Set {name} today\n");
+  for(const value of ["Title {name}","Title #",'Title {a="x\\"}']) {
+    const document: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("preserves literal punctuation across enclosing inline and block contexts",()=> {
+  for(const value of ["[", "]", "[x]", "\\", "`", "``", "*", "**", "_", "~", "~~", "@word", ":chip[a\\]", '{a="x\\"}', "x < 5", "a | b"]) {
+    for(const type of ["paragraph", "heading", "lineBlock", "strong", "emphasis", "delete", "link", "inline"]) {
+      const node={type,value,...(type === "heading" ? {level:2}:{}),...(type === "link" ? {url:"target"}:{}),...(type === "inline" ? {subType:"chip"}:{})};
+      const document: Document={type:"document",version:1,body:[
+        ["paragraph","heading","lineBlock"].includes(type) ? node:{type:"paragraph",children:[node]},
+      ]};
+      expect(parse(stringify(document)),`${type}: ${JSON.stringify(value)}`).toEqual(document);
+    }
+  }
+});
+
+it("writes prose colons without unnecessary escapes in paragraphs and lists",()=> {
+  const source="Status: Open question. Meet at 10:30; https://example.test.\n\n- Coral Island: Underground exploration, ore and gems, and combat.\n\n- Fae Farm: Mine expeditions pair materials with creature encounters.";
+  const document=parse(source);
+  const output=stringify(document);
+  expect(output).not.toContain("\\:");
+  expect(parse(output)).toEqual(document);
+});
+it("keeps directive-shaped literal text and text beside links literal",()=> {
+  for(const value of ["::toc","::: warning",":chip[label]{kind=plain}"]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+    {type:"text",value:"Literal :chip"},{type:"link",value:"docs",url:"https://example.test"},
+  ]}]};
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it("keeps a literal colon before an inline directive from opening a leaf block",()=> {
+  for(const continued of [false,true]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+      ...(continued ? [{type:"text",value:"Text"},{type:"softBreak"}]:[]),
+      {type:"text",value:":"},{type:"inline",subType:"chip",value:"Ready"},
+    ]}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("writes readable destinations and preserves destinations needing delimiters",()=> {
+  const readable="[Guide](../guides/start.md#setup) and ![Diagram](./assets/diagram.png).";
+  expect(stringify(parse(readable))).toBe(readable);
+  for(const source of ['[Guide](<../guides/start (advanced).md>)', '![Diagram](<./assets/diagram(final).png> "Example")']) {
+    const document=parse(source);
+    const output=stringify(document);
+    expect(output).toContain("(<");
+    expect(parse(output)).toEqual(document);
+  }
+});
+it("keeps ordinary headings, lists, code and semantic inline content readable",()=> {
+  for(const source of [
+    "# Setup: Quick start\n\n- Item: description.\n- Next item: more detail.",
+    "Use `const map = {ready: true}`.\n\n```ts\nconst ready: boolean = true;\n```",
+    "Thanks, @[Ada Lovelace]#user-123. :chip[Ready]",
+  ]) {
+    const document=parse(source);
+    expect(stringify(document)).toBe(source);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+
+it("writes intraword underscores and email link labels without unnecessary escapes",()=> {
+  for(const source of [
+    "Use snake_case, a_b_c and naïve_identifier.",
+    "[support@example.test](mailto:support@example.test)",
+  ]) {
+    const document=parse(source);
+    expect(stringify(document)).toBe(source);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
+it("preserves explicitly plain URL and email text without creating autolinks",()=> {
+  for(const value of ["https://example.test", "HTTP://example.test/path", "ftp://example.test/file", "www.example.test", "support@example.test"]) {
+    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    expect(parse(stringify(document))).toEqual(document);
+  }
+  for(const source of ["https://example.test", "www.example.test", "support@example.test"]) {
+    const document=parse(source);
+    const output=stringify(document);
+    expect(output).not.toMatch(/\\[:@.]/);
+    expect(parse(output)).toEqual(document);
+  }
+});
+it("preserves literal text split across adjacent nodes without mutating the AST",()=> {
+  for(const values of [["https","://example.test"],["www",".example.test"],[":ch","ip[Ready]"]]) {
+    for(const emptyAttributes of [false,true]) {
+      const document: Document={type:"document",version:1,body:[{type:"paragraph",children:values.map(value=>({type:"text",value,...(emptyAttributes ? {attributes:{}}:{})}))}]};
+      const original=structuredClone(document);
+      expect(parse(stringify(document))).toEqual({type:"document",version:1,body:[{type:"paragraph",value:values.join("")}]});
+      expect(document).toEqual(original);
+    }
+  }
+});
+it("preserves ordinary document spacing, nested lists, tables, containers and tabs",()=> {
+  for(const source of [
+    "# Heading\n\nFirst paragraph.\n\nSecond paragraph.",
+    "1. One\n2. Two\n\n- First\n  - Nested\n- Last",
+    "| Name | State |\n| --- | --- |\n| snake_case | Ready: yes |",
+    "::: warning [Before deploying] {#deployment-check}\n\nBack up first: verify backup.\n\n:::",
+    ":::: tabs {group=language}\n::: tab [JavaScript] {value=js}\n```js\nconst ready = true;\n```\n:::\n::: tab [Python] {value=py}\n```py\nready = True\n```\n:::\n::::",
+    "| First line\n| Second line\n|\n\nNext paragraph.",
+  ]) {
+    const document=parse(source);
+    expect(parse(stringify(document))).toEqual(document);
+  }
+});
 
 it("preserves marked whitespace and neighboring rich content through Markdown",()=> {
   for(const type of ["strong","emphasis","delete"]) for(const value of ["Hello "," Hello"," ","\tHello\t","\u00a0Hello\u00a0"]) {
@@ -52,7 +255,7 @@ it("preserves duplicate YAML final values and custom reserved structural metadat
   const doc=parse('---\ntitle: Old\ntitle: New\nversion: product-v2\nbody: customer-data\ncustom: null\n---\nText',{onDiagnostic:d=>diagnostics.push(d)});
   expect(doc).toMatchObject({version:1,title:{value:"New"},metadata:{version:"product-v2",body:"customer-data",custom:null}});
   expect(diagnostics).toContainEqual(expect.objectContaining({code:"duplicate-metadata-key"}));
-  expect(parse(stringify(doc))).toEqual(doc);
+  expect(semantic(parse(stringify(doc)))).toEqual(doc);
 });
 it("does not restore active or structural values from forged native attribute payloads",()=> {
   const doc=parse('<p data-attributes="{&quot;onclick&quot;:&quot;run()&quot;,&quot;style&quot;:&quot;background:url(javascript:run())&quot;,&quot;id&quot;:&quot;forged&quot;,&quot;ref&quot;:&quot;forged&quot;,&quot;__proto__&quot;:&quot;polluted&quot;}">Safe</p>');
@@ -99,7 +302,7 @@ it("keeps an ordinary list label that resembles a task unchecked",()=> {
 });
 it("normalizes absent optional nulls while preserving null metadata and rejecting non-JSON data",()=> {
   const doc={type:"document",version:1,id:null,title:null,metadata:{custom:null},body:[{type:"paragraph",value:"Text",children:null,attributes:null}]} as never;
-  expect(parse(stringify(doc))).toEqual({type:"document",version:1,metadata:{custom:null},body:[{type:"paragraph",value:"Text"}]});
+  expect(semantic(parse(stringify(doc)))).toEqual({type:"document",version:1,metadata:{custom:null},body:[{type:"paragraph",value:"Text"}]});
   expect(()=>stringify({type:"document",version:1,metadata:{number:Infinity},body:[]})).toThrow(/JSON/);
 });
 it("rejects malformed supplied scalar fields, metadata, groups and rich grids",()=> {
@@ -123,7 +326,7 @@ it("rejects one-line identity and tight-wrapper title violations without corrupt
   expect(()=>stringify({type:"document",version:1,body:[{type:"heading",level:2,id:"line\nbreak",value:"Title"}]})).toThrow(/ID/);
   expect(()=>stringify({type:"document",version:1,body:[{type:"container",subType:"note",title:{type:"title",value:" padded "},body:[]}]})).toThrow(/title/);
   const root={type:"document",version:1,id:"line\nbreak",body:[]} as const;
-  expect(parse(stringify(root as never))).toEqual(root);
+  expect(semantic(parse(stringify(root as never)))).toEqual(root);
 });
 it("quotes attributes with grammar escapes, retaining literal tabs and backslash text",()=> {
   const doc=parse('::: note {label="tab\tand \\\\n" id="item\tkey"}\nText\n:::');
@@ -136,6 +339,6 @@ it("rejects metadata fields that cannot retain their designated AST home",()=> {
   }
   const diagnostics: unknown[]=[];
   const source=stringify({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{id:"shadow",title:"Shadow",description:"Valid **description**",tags:["valid"],custom:null},body:[]},{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(parse(source)).toEqual({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{description:"Valid **description**",tags:["valid"],custom:null},body:[]});
+  expect(semantic(parse(source))).toEqual({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{description:"Valid **description**",tags:["valid"],custom:null},body:[]});
   expect(diagnostics.filter((value: unknown)=>(value as {code:string}).code === "metadata-conflict")).toHaveLength(2);
 });

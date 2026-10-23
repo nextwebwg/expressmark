@@ -27,12 +27,22 @@ export interface Node {
   language?: string;
   meta?: string;
   ref?: string;
-  align?: ("left" | "center" | "right" | null)[];
+  label?: string;
+  referenceType?: "full" | "collapsed" | "shortcut";
+  /** The authored callout spelling: a colon container (the default) or an alert. */
+  spelling?: "container" | "alert";
+  /** The authored container title spelling: `[Title]` (the default) or unbracketed text. */
+  titleSpelling?: "bracketed" | "unbracketed";
+  align?: ("start" | "center" | "end" | null)[];
   header?: boolean;
   colSpan?: number;
   rowSpan?: number;
   display?: "inline" | "block";
-  tag?: "span" | "div";
+  /** A group's element, or an HTML element's tag name. */
+  tag?: string;
+  /** An HTML element's start tag and closing tag, as written. An unclosed element has no `close`. */
+  open?: string;
+  close?: string;
 }
 export interface Document extends Node {
   type: "document";
@@ -40,13 +50,38 @@ export interface Document extends Node {
   body: Node[];
   title?: Node;
   metadata?: { [key: string]: Json };
+  /** The syntax that read the document, when it is `modern` or set by its frontmatter. */
+  syntax?: Syntax;
 }
+/** `compatible` reads CommonMark 0.31.2 and GFM with the extensions; `modern` reads the Expressive Markdown spec. */
+export type Syntax = "compatible" | "modern";
 export interface Diagnostic {
   code: string;
   message: string;
   severity: "warning";
+  /** The lines of the block that holds the construct, for a lint warning. */
+  position?: Position;
+  /** The preferred form, for a lint warning. */
+  preferred?: string;
 }
-export interface ConversionOptions { onDiagnostic?: (diagnostic: Diagnostic) => void }
+/** `true` turns every lint rule on; a map turns rules on, except those set to `false`. */
+export type LintOption = boolean | Readonly<Record<string, boolean>>;
+export const linting = (option: LintOption | undefined, code: string): boolean => option === true || typeof option === "object" && option !== null && option[code] !== false;
+export interface ConversionOptions {
+  onDiagnostic?: (diagnostic: Diagnostic) => void;
+  /**
+   * Keep raw HTML verbatim as opaque `html` nodes, unfiltered. Only for content
+   * the site's own authors write, never user-submitted or third-party content;
+   * `renderHtml` still applies its profile and the host's allowlist.
+   */
+  trustedHtml?: boolean;
+  /** The syntax for documents whose frontmatter sets none. Default `compatible`. */
+  syntax?: Syntax;
+  /** `parse`: report spellings other than the preferred form, as lint warnings. */
+  lint?: LintOption;
+  /** `stringify`: write the preferred form of every spelling the lint rules flag. */
+  preferredForms?: boolean;
+}
 export class ConversionError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {

@@ -2,8 +2,14 @@
 
 # expressmark
 
-Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/) into an
-editable JSON document, change the data, and write Markdown again.
+Capture rich document metadata and formatting without sacrificing Markdown
+readability. Parse [Expressive Markdown](https://nextwebwg.org/expressive-markdown/)
+into an editable JSON document, change the data, and write Markdown again.
+
+Build **rich editor → Markdown → rich editor** workflows with explicit
+containers, attributes and YAML frontmatter. Supported block types, titles,
+metadata and formatting stay expressible in the text, so tools can restore that
+context when opening the document again.
 
 **[Quick start](#quick-start)** · **[HTML transformers](#make-the-html-your-own)** ·
 **[Layout](#align-and-float-content)** ·
@@ -43,7 +49,7 @@ Back up the database first.
 
 ## Make the HTML your own
 
-**New for 0.1.2; not yet in the published 0.1.1 package.** Import the separate
+**Available from 0.1.2.** Import the separate
 renderer and override only the node types you need:
 
 ```ts
@@ -64,6 +70,12 @@ renderers on its children. Use `context.escape(text)` when inserting authored
 strings into HTML. Custom output passes through the same safe HTML profile as
 default output. See [the transformer guide](docs/html-transformers.md) for lookup
 order, titles, omission, defaults and output-policy limits.
+
+Render options add heading anchor IDs, leave out the designated title's `<h1>`,
+and pass every text run through a host escaping hook. A site whose pages only
+its own authors write can keep raw HTML and admit its components with
+[trusted host content](docs/safe-html.md#trusted-host-content); the default
+stays the strict safe profile.
 
 Open semantic types and attributes cover most application customization without
 new grammar. markdown-it is an internal engine; Expressmark exposes no supported
@@ -90,14 +102,28 @@ group or inherit it from the surrounding HTML. `lang` alone does not set directi
 `parse` and `stringify` preserve layout data; `renderHtml` supplies native logical
 CSS. [Layout examples and browser verification](docs/html-transformers.md#layout)
 cover Arabic, Hebrew, nested direction changes and child overrides. This built-in
-rendering is targeted for 0.1.2.
+rendering is available from 0.1.2.
 
 ## What you can write
 
-- CommonMark blocks and inline content, plus GFM tables, tasks, strikethrough and autolinks.
+- Two syntaxes: `compatible`, the default, reads CommonMark 0.31.2 and GFM
+  blocks and inline content, including tables, tasks, strikethrough and
+  autolinks; `modern` reads the Expressive Markdown specification, with
+  Markdown inside HTML elements and no indented code. The `syntax` option
+  chooses, and a document's `markdownSyntax` frontmatter overrides it; see
+  [syntax](docs/syntax.md).
+- Lint warnings for spellings other than the preferred form, and a writer
+  option that writes the preferred form; see [lint](docs/lint.md).
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
-- Nested colon containers, inline/leaf directives, open semantic types and shared string/flag attributes.
+- Nested colon containers, typeless generic containers, inline/leaf directives, open semantic types and shared string/flag attributes, including `#id` and `.class` shorthand.
+- Bracketed spans, `[text]{.note}`, for inline text with attributes. The longhand `{class="note" id="x"}` works the same as `{.note #x}`.
+- Alerts, `> [!note] Title`, as a supported second spelling of a callout, written back as authored.
+- Unbracketed container titles, `::: warning Before you upgrade`, written back as authored.
 - Mention shorthand, chips and authored TOC placeholders.
+- Footnotes: `[^label]` references and `[^label]:` definitions, kept where they
+  were written and rendered as one numbered, back-linked notes section.
+- Reference-style links and images with their `[label]: url` definitions, kept
+  in their authored form and resolved when rendering.
 - Adjacent tab grouping and explicit tabs settings, including shared selection names.
 - Leading-pipe line blocks, code captions and presentation attributes.
 - Named and positional list tables, including rich cells, headers, alignment, transpose and rectangular merges.
@@ -112,8 +138,14 @@ conformance. The normative [syntax](https://nextwebwg.org/expressive-markdown/la
 ## Converter contract
 
 `parse(markdown, options?)` synchronously returns a version-1 `Document`.
-`stringify(document, options?)` synchronously returns canonical Markdown with a
-terminal newline, or `""` for an empty document. Neither executes code, loads
+`stringify(document, options?)` synchronously returns Markdown. An unedited
+parse writes back byte for byte, in both syntaxes, spacing and line endings
+included: the document records its source text and each top-level block's
+range in `source`, and an edited or new block is written in canonical form with
+the source's spacing kept around its unedited neighbours. A document built
+without a source is written in canonical form with a terminal newline, or `""`
+when empty. In the safe profile, a block holding HTML is written through the
+profile. Neither executes code, loads
 assets, resolves mentions, generates a TOC, or renders HTML. `renderHtml` is a
 separate operation.
 
@@ -130,10 +162,16 @@ Recoverable source errors become `literal` nodes with optional warnings. Duplica
 attributes and YAML keys use the final value; duplicate authored IDs stay
 unchanged. Invalid ASTs, unsupported versions, unknown structural nodes, and
 unsupported source mappings throw `ConversionError` with a `code`. Unknown
-semantic subtypes remain valid. Conversion does not preserve source bytes.
+semantic subtypes remain valid. Content stays where it was written, and writers
+keep the author's spelling: `parse` records each choice between accepted forms
+in the node's `source`, such as `_` emphasis, `*` bullets, setext headings,
+tilde fences, pipe tables or an attribute list's separators, and `stringify`
+writes it back while it still reads as the node. New or edited content uses the
+preferred form. Whitespace inside a construct and character escapes follow the
+writer's canonical form.
 
 Exported JSON types include `Document`, `Node`, `Attributes`, `Json`, `Position`,
-`Point`, `Diagnostic`, and `ConversionOptions`. Content uses exclusive `body`,
+`Point`, `Diagnostic`, `ConversionOptions` and `Syntax`. Content uses exclusive `body`,
 `children`, or `value` slots; `title` is a separate designated slot. The writer
 validates child contexts and merged table grids. Source positions are not
 currently generated.

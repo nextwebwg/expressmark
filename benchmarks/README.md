@@ -21,7 +21,7 @@ to Expressmark's runtime. Timings are intentionally outside `verify:pr`; shared 
 machines are unsuitable for tight speed thresholds.
 
 `BENCH_SAMPLES` defaults to 7 and must be an integer of at least 3.
-`BENCH_DURATION_MS` defaults to 100 and must be at least 10. For another built
+`BENCH_DURATION_MS` defaults to 100 and must be at least 10. `BENCH_SYNTAX` sets the syntax the expressmark tasks parse and write with, `compatible` (the default) or `modern`. For another built
 checkout, set `BENCH_EXPRESSMARK_ROOT` to its absolute path. This lets the same
 suite compare baseline and candidate worktrees without copying a repository or
 installing dependencies separately in each one.

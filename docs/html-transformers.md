@@ -2,8 +2,7 @@
 
 `renderHtml(document, options?)` from `expressmark/render` renders a version-1
 Expressmark document to a sanitized HTML fragment. Override one node type while
-keeping the defaults everywhere else. This entry point is new for 0.1.2 and is not
-available in the published 0.1.1 package.
+keeping the defaults everywhere else. This entry point is available from 0.1.2.
 
 ```ts
 import { parse } from "expressmark";
@@ -55,13 +54,38 @@ const html = renderHtml(parse("# Hello *world*"), {
 | Context method | Behavior |
 | --- | --- |
 | `escape(text)` | Escape `&`, `<`, `>`, and `"` for text or quoted attribute values |
-| `renderChildren()` | Render escaped `value`, or `body`/`children` through overrides; excludes `title` |
+| `renderChildren()` | Render escaped `value`, or `body`/`children` through overrides; excludes `title` and footnote definitions, which render in the document's notes section |
 | `renderDefault()` | Render the current node with its built-in mapping, keeping child overrides |
 | `render(node)` | Render another node, including a designated title, through overrides |
 
 `renderDefault()` applies the code/opaque HTML rules for those node types.
 `renderChildren()` treats `value` as text. Calling `render()` on an active ancestor
 throws `ConversionError` with code `cyclic-html-node`.
+
+## Page rendering options
+
+```ts
+renderHtml(document, {
+  headingIds: true,        // recommended anchors on headings without an authored ID
+  title: false,            // leave out the designated title's <h1>; document.title remains
+  escapeText: html => html.replace(/\{/g, "&#123;"), // every text run and code value
+});
+```
+
+`headingIds` uses `headingAnchors(document)`, exported from `expressmark`,
+which returns each heading's ID by the specification's
+[recommended anchor algorithm](https://nextwebwg.org/expressive-markdown/parsing#recommended-output-anchors):
+IDs authored in the body are reserved first, other headings take their text's
+anchor, and collisions add `-1`, `-2` and so on. The document's own `id` is its
+identity, written on no element, so it reserves no anchor. Call it to build outlines and cross-page
+links that match the rendered IDs. `anchorText(text)` gives one text's anchor.
+
+`escapeText` runs after the safe profile on every rendered text run and code
+value, such as escaping `{` for a template host. It receives HTML-escaped text
+and returns HTML. Raw HTML, attribute values and transformer markup never pass
+through it; text a transformer renders through `context.render` or
+`renderChildren` does. Trusted host HTML is described in the
+[safe HTML profile](safe-html.md#trusted-host-content).
 
 ## Defaults and output policy
 

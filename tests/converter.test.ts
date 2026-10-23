@@ -1,6 +1,52 @@
 import { expect, it } from "vitest";
 import { parse, stringify } from "../src/index.js";
 
+it.each(["a@word", "a@[Ada]", "(@word)", "!@[Ada]", "日@word", "/@word"])("requires whitespace or a line start before mentions: %s", source => {
+  expect(parse(source).body).toEqual([{type:"paragraph",value:source}]);
+  expect(stringify(parse(source))).toBe(source);
+});
+
+it.each(["@ada", "Hello @ada", "Hello\n@ada", "Hello\t@[Ada]", "Hello\u00a0@ada"])("recognizes mentions at a whitespace boundary: %s", source => {
+  expect(JSON.stringify(parse(source))).toContain('"subType":"mention"');
+  expect(parse(stringify(parse(source)))).toEqual(parse(source));
+});
+
+it.each([
+  ':mention[Ada Lovelace]',
+  ':mention[Ada Lovelace]{ref="org/user-123"}',
+  ':mention[Ada]{#acknowledgement}',
+  ':MENTION[Ada]',
+  ':MeNtIoN{ref=ada}',
+])("keeps replaced named mention source literal: %s", source => {
+  const document = parse(source);
+  expect(document.body).toEqual([{type:"paragraph",value:source}]);
+  expect(parse(stringify(document))).toEqual(document);
+});
+
+it.each([
+  '@[Ada Lovelace]',
+  '@ada-lovelace',
+  '@[Ada Lovelace]#user-123{#acknowledgement}',
+  '@ada-lovelace#user-123',
+  '@[**Ada Lovelace**]{ref="org/user-123"}',
+])("round-trips the replacement mention source form: %s", source => {
+  const document = parse(source);
+  expect(document.body[0]?.children?.[0]).toMatchObject({type:"inline",subType:"mention"});
+  const output = stringify(document);
+  expect(output).toBe(source);
+  expect(parse(output)).toEqual(document);
+});
+
+it("keeps ordinary formatting and other directives beside the removed mention form", () => {
+  const document = parse('Old :mention[**Ada**], current @[Ada], :chip[Ready] and :mentioning[Topic].');
+  const children = document.body[0]?.children ?? [];
+  expect(children.filter(node => node.type === "inline" && node.subType === "mention")).toHaveLength(1);
+  expect(children).toContainEqual({type:"strong",value:"Ada"});
+  expect(children).toContainEqual({type:"inline",subType:"chip",value:"Ready"});
+  expect(children).toContainEqual({type:"inline",subType:"mentioning",value:"Topic"});
+  expect(parse(stringify(document))).toEqual(document);
+});
+
 it("parses authored identities, metadata, inline structure and mention references", () => {
   const document = parse('---\nid: guide\ntitle: "Deploy **safely**"\ncustom: {enabled: true}\n---\n## Deploy {#deploy}\n\nThanks, @[Ada Lovelace]#user-123{#thanks}.');
   expect(document).toMatchObject({type:"document",version:1,id:"guide",metadata:{custom:{enabled:true}},body:[{type:"heading",level:2,id:"deploy",value:"Deploy"},{type:"paragraph",children:[{type:"text",value:"Thanks, "},{type:"inline",subType:"mention",value:"Ada Lovelace",ref:"user-123",id:"thanks"},{type:"text",value:"."}]}]});
@@ -75,12 +121,13 @@ it("imports rich native tables as editable spans and block cells", () => {
 it("preserves malformed regions as literal recovery and reports invalid YAML", () => {
   const diagnostics: unknown[]=[];
   const document=parse('---\ntitle: [not a title]\n---\n\n::: warning\nUnclosed.',{onDiagnostic:d=>diagnostics.push(d)});
-  expect(document.body.map(node=>node.type)).toEqual(["literal","literal"]);
+  // An unclosed container runs to the end of its enclosing block.
+  expect(document.body.map(node=>node.type)).toEqual(["literal","container"]);
   expect(diagnostics.length).toBe(2);
 });
 
 it("preserves rich-cell custom attributes and authored flag values in safe native fallback", () => {
-  const document={type:"document",version:1,body:[{type:"table",align:["left","right"],children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",colSpan:2,attributes:{columnWidths:"100,120",textAlign:"center",backgroundColor:"#ffeeaa",responsive:false},body:[{type:"paragraph",value:"Rich"},{type:"paragraph",value:"body"}]}]}]}]} as const;
+  const document={type:"document",version:1,body:[{type:"table",align:["start","end"],children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",colSpan:2,attributes:{columnWidths:"100,120",textAlign:"center",backgroundColor:"#ffeeaa",responsive:false},body:[{type:"paragraph",value:"Rich"},{type:"paragraph",value:"body"}]}]}]}]} as const;
   const parsed=parse(stringify(document as never));
   expect(parsed).toEqual(document);
 });
@@ -98,4 +145,9 @@ it("reports inline attachment diagnostics once when reusing parsed tokens", () =
   const document = parse("A :chip[Ready]{tone=red tone=green}.", { onDiagnostic: diagnostic => diagnostics.push(diagnostic) });
   expect(document.body[0]?.children?.[1]).toMatchObject({ type: "inline", subType: "chip", attributes: { tone: "green" } });
   expect(diagnostics).toEqual([expect.objectContaining({ code: "duplicate-attribute" })]);
+});
+
+
+it.each(["left", "right"])("rejects physical table alignment in AST input: %s", alignment => {
+  expect(() => stringify({type:"document",version:1,body:[{type:"table",align:[alignment],children:[]}]} as never)).toThrow(/alignment/);
 });

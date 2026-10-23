@@ -1,4 +1,7 @@
-import { escapeHtml, sanitizeHtml } from "./html.js";
+import { headingAnchors } from "./anchors.js";
+import { allowedElement, escapeHtml, normalizeTags, rawTextElements, readStartTag, sanitizeHtml, voidElements, type HtmlAllowlist } from "./html.js";
+import { footnoteDefinitions, linkDefinitions, references, referenceOrder } from "./references.js";
+import { normalizeLabel } from "./grammar.js";
 import { sourceKey } from "./grammar.js";
 import { ConversionError, warn, type ConversionOptions, type Document, type Node } from "./types.js";
 
@@ -24,7 +27,27 @@ export type HtmlTransformer = (node: Readonly<Node>, context: HtmlRenderContext)
 export interface HtmlRenderOptions extends Pick<ConversionOptions, "onDiagnostic"> {
   /** Lookup order: "type:subType", "type", "*", then the built-in mapping. */
   transformers?: Readonly<Record<string, HtmlTransformer>>;
+  /**
+   * Add the host's elements, attributes, styles and URL schemes to the safe
+   * profile, for raw HTML and transformer output alike. Only for content the
+   * site's own authors write; never for user-submitted or third-party content.
+   */
+  trustedHtml?: HtmlAllowlist;
+  /** Give headings without an authored ID their recommended anchor ID. */
+  headingIds?: boolean;
+  /**
+   * Transform every rendered text run and code value after the safe profile,
+   * such as escaping `{` for a template host. It receives HTML-escaped text and
+   * returns HTML; raw HTML and attribute values never pass through it.
+   */
+  escapeText?: (html: string) => string;
+  /** Render the designated document title as a leading `<h1>`. Default `true`. */
+  title?: boolean;
 }
+
+// Text runs are bracketed with control characters, which HTML text never
+// carries, so the hook can find them after the profile has run.
+const TEXT_START = "\u0002", TEXT_END = "\u0003";
 
 /** Render with node overrides, then apply the shared safe HTML profile once. */
 export function renderHtml(document: Document, options: HtmlRenderOptions = {}): string {
@@ -32,13 +55,44 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
     throw new ConversionError("unsupported-version", "Expected a document with version 1 and a body array.");
   }
   const active = new Set<Node>();
+  const diagnostics: ConversionOptions = options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {};
+  const anchors = options.headingIds ? headingAnchors(document) : undefined;
+  const tight: boolean[] = [];
+  // Authored HTML that the profile disallows is shown as text, as GitHub's tag filter shows it.
+  const allowed = (name: string) => allowedElement(name, options.trustedHtml);
+  const shownElement = (name: string) => warn(diagnostics, "html-element-escaped", `<${name}> is outside the safe HTML profile; it is shown as text.`);
+  const authored = (html: string) => { const result = normalizeTags(html, allowed, false); result.shown.forEach(shownElement); return result.html; };
+  const modernDocument = document.syntax === "modern";
+  const hook = options.escapeText;
+  function text(value: string): string {
+    const escaped = escapeHtml(value);
+    // oxlint-disable-next-line no-control-regex -- authored text cannot forge a marker.
+    return hook ? `${TEXT_START}${escaped.replace(/[\u0002\u0003]/g, "")}${TEXT_END}` : escaped;
+  }
   const transformers = options.transformers ?? {};
   let inheritedAlignment: LayoutAlignment | undefined;
+  // Definitions render once, collected at the end and numbered by first
+  // reference; each note counts its references for back-links.
+  const notes = footnoteDefinitions(document);
+  const rendered = referenceOrder(document, notes);
+  const numbers = new Map(rendered.map((label, index) => [label, index + 1]));
+  const counts = new Map<string, number>();
+  const count = (label: string) => { if (notes.has(label)) counts.set(label, (counts.get(label) ?? 0) + 1); };
+  references(document, count);
+  for (const label of rendered) for (const child of notes.get(label)!.body ?? []) references(child, count);
+  const occurrences = new Map<string, number>();
+  // Reference links resolve here, against the first definition of each label.
+  const definitions = linkDefinitions(document);
   function content(node: Node): string {
-    return node.value != null ? escapeHtml(node.value) : (node.body ?? node.children ?? []).map(render).join("");
+    return node.value != null ? text(node.value) : join((node.body ?? node.children ?? []).filter(child => child?.type !== "footnoteDefinition"), render);
+  }
+  // Elements on their own lines keep the line break between them, as HTML
+  // does, so inline elements such as a row of badges stay apart.
+  function join(nodes: Node[], each: (node: Node) => string, lines = false): string {
+    return nodes.map((child, index) => `${index && (lines || child?.type === "htmlElement" && child.display === "block" && nodes[index - 1]?.type === "htmlElement" && nodes[index - 1]?.display === "block") ? "\n" : ""}${each(child)}`).join("");
   }
   function title(node: Node): string {
-    return typeof node.title === "string" ? escapeHtml(node.title) : node.title ? render(node.title) : "";
+    return typeof node.title === "string" ? text(node.title) : node.title ? render(node.title) : "";
   }
   function attributes(node: Node, extra: Record<string, string | boolean | number> = {}): string {
     const values: Record<string, string | boolean | number> = { ...node.attributes, ...extra };
@@ -62,8 +116,8 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
     const requested = node.attributes?.align;
     const alignment = isAlignment(requested) ? requested : inheritedAlignment ?? "start";
     const float = node.attributes?.float;
-    if (requested !== undefined && !isAlignment(requested)) warn(options, "unsupported-layout-attribute", "Layout align needs start, center or end; using inherited alignment or start.");
-    if (float !== undefined && float !== "start" && float !== "end") warn(options, "unsupported-layout-attribute", "Layout float needs start or end; using ordinary flow.");
+    if (requested !== undefined && !isAlignment(requested)) warn(diagnostics, "unsupported-layout-attribute", "Layout align needs start, center or end; using inherited alignment or start.");
+    if (float !== undefined && float !== "start" && float !== "end") warn(diagnostics, "unsupported-layout-attribute", "Layout float needs start or end; using ordinary flow.");
     function item(value: string, align: LayoutAlignment, inlineSize: "fit-content" | "auto" = "fit-content"): string {
       const start = align === "start" ? "0" : "auto";
       const end = align === "end" ? "0" : "auto";
@@ -92,48 +146,105 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   }
   function defaultRender(node: Node): string {
     switch (node.type) {
-      case "document": return `${node.title ? `<h1>${title(node)}</h1>` : ""}${content(node)}`;
+      case "document": {
+        const value = `${node.title && options.title !== false ? `<h1>${title(node)}</h1>` : ""}${content(node)}`;
+        const items = rendered.map(label => render(notes.get(label)!)).join("");
+        return items ? `${value}<section data-footnotes aria-label="Footnotes"><ol>${items}</ol></section>` : value;
+      }
+      case "definition": case "strayFence": return "";
+      case "linkReference": case "imageReference": {
+        const definition = definitions.get(normalizeLabel(node.label ?? ""));
+        const link = { href: definition?.url ?? "", ...(typeof definition?.title === "string" ? { title: definition.title } : {}) };
+        if (definition && node.type === "linkReference") return element(node, "a", content(node), link);
+        if (definition) return `<img${attributes(node, { src: link.href, alt: node.alt ?? "", ...(link.title !== undefined ? { title: link.title } : {}) })}>`;
+        // CommonMark's fallback: an unresolved reference is its own source text.
+        const suffix = node.referenceType === "full" ? `[${node.label}]` : node.referenceType === "collapsed" ? "[]" : "";
+        return node.type === "linkReference" ? `[${content(node)}]${text(suffix)}` : text(`![${node.alt ?? ""}]${suffix}`);
+      }
+      case "footnoteReference": {
+        const label = node.label ?? "";
+        if (!notes.has(label)) return text(`[^${label}]`);
+        const occurrence = (occurrences.get(label) ?? 0) + 1;
+        occurrences.set(label, occurrence);
+        return `<sup><a href="#fn:${escapeHtml(label)}" id="fnref:${escapeHtml(label)}${occurrence > 1 ? `:${occurrence}` : ""}" data-footnote-ref>${numbers.get(label)}</a></sup>`;
+      }
+      case "footnoteDefinition": {
+        const label = node.label ?? "";
+        const number = numbers.get(label);
+        const backlinks = Array.from({ length: counts.get(label) ?? 0 }, (_, index) => {
+          const suffix = index ? `:${index + 1}` : "";
+          return ` <a href="#fnref:${escapeHtml(label)}${suffix}" data-footnote-backref aria-label="Back to reference ${number}${index ? `-${index + 1}` : ""}">↩${index ? `<sup>${index + 1}</sup>` : ""}</a>`;
+        }).join("");
+        // Back-links close the note's last paragraph, or form their own.
+        const body = content(node);
+        return element(node, "li", body.endsWith("</p>") ? `${body.slice(0, -4)}${backlinks}</p>` : `${body}<p>${backlinks.trimStart()}</p>`, { id: `fn:${label}` });
+      }
       case "title": case "literal": return content(node);
       case "text": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "span", content(node)) : content(node);
-      case "html": return node.value ?? "";
+      // A closing tag never creates an element: a stray one, kept for writing, renders nothing.
+      case "html": return modernDocument && /^<\/[A-Za-z][A-Za-z0-9-]*[^>]*>$/.test(node.value ?? "") ? "" : authored(node.value ?? "");
       case "paragraph": return element(node, "p", content(node));
       case "heading":
         if (!Number.isInteger(node.level) || node.level! < 1 || node.level! > 6) throw new ConversionError("unsupported-html-node", "HTML headings need a level from 1 to 6.");
-        return element(node, `h${node.level}`, content(node));
+        return element(node, `h${node.level}`, content(node), anchors && node.id === undefined ? { id: anchors.get(node)! } : {});
       case "strong": return element(node, "strong", content(node));
       case "emphasis": return element(node, "em", content(node));
       case "delete": return element(node, "s", content(node));
       case "underline": return element(node, "u", content(node));
       case "highlight": return element(node, "mark", content(node));
-      case "inlineCode": return element(node, "code", escapeHtml(node.value ?? ""));
+      case "inlineCode": return element(node, "code", text(node.value ?? ""));
       case "softBreak": return "\n";
       case "break": return `<br${attributes(node)}>`;
       case "horizontalRule": return `<hr${attributes(node)}>`;
       case "link": return element(node, "a", content(node), { href: node.url ?? "", ...(typeof node.title === "string" ? { title: node.title } : {}) });
       case "image": return `<img${attributes(node, { src: node.url ?? "", alt: node.alt ?? "", ...(typeof node.title === "string" ? { title: node.title } : {}) })}>`;
       case "blockquote": return element(node, "blockquote", content(node));
-      case "list": return element(node, node.ordered ? "ol" : "ul", content(node), node.ordered && node.start !== undefined ? { start: node.start } : {});
+      case "list": {
+        tight.push(node.tight === true);
+        try { return element(node, node.ordered ? "ol" : "ul", content(node), node.ordered && node.start !== undefined ? { start: node.start } : {}); }
+        finally { tight.pop(); }
+      }
       // Form controls are outside the safe profile, so task status stays inert.
-      case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${content(node)}`);
+      // A tight list's paragraphs render without <p>, as CommonMark's do.
+      case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${tight.at(-1) && node.tight !== false ? unwrapped(node) : content(node)}`);
+      // An element's paragraphs take `<p>` when blank lines separate its blocks.
+      // An unclosed element closes where its enclosing block ends.
+      case "htmlElement": {
+        const tag = node.tag ?? "";
+        const empty = voidElements.has(tag);
+        // The output is complete HTML: `</br>` is `<br>`, and `/>` closes a non-void element.
+        const start = node.open ?? "";
+        const open = start.startsWith("</") ? `<${tag}>` : !empty && readStartTag(start, 0)?.selfClosing ? start.slice(0, -2).trimEnd() + ">" : start;
+        const close = empty ? "" : node.close ?? `</${tag}>`;
+        const inner = node.value !== undefined ? rawTextElements.has(tag) && allowed(tag) ? node.value : text(node.value) : node.children ? content(node) : node.tight === false ? content(node) : unwrapped(node, true);
+        if (!allowed(tag)) { shownElement(tag); return `${text(node.open ?? "")}${inner}${node.close ? text(node.close) : ""}`; }
+        return `${open}${inner}${close}`;
+      }
       case "code": {
-        const code = element(node, "pre", `<code${node.language ? ` class="language-${escapeHtml(node.language)}"` : ""}>${escapeHtml(node.value ?? "")}</code>`);
+        const code = element(node, "pre", `<code${node.language ? ` class="language-${escapeHtml(node.language)}"` : ""}>${text(node.value ?? "")}</code>`);
         return node.title ? `<figure>${code}<figcaption>${title(node)}</figcaption></figure>` : code;
       }
       case "group": return element(node, node.display === "inline" ? "span" : "div", content(node));
       case "lineBlock": return element(node, "div", content(node), { "data-type": "line-block", style: "white-space:pre-line" });
-      case "inline": case "leaf": return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { "data-type": node.subType ?? "", ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
+      case "inline": case "leaf": return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { ...(node.subType !== undefined ? { "data-type": node.subType } : {}), ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
       case "container": {
         if (node.subType === "layout") return layout(node);
         const heading = title(node);
         if (node.subType === "details") return element(node, "details", `${node.title ? `<summary>${heading}</summary>` : ""}${content(node)}`);
         if (node.subType === "figure") return element(node, "figure", `${content(node)}${node.title ? `<figcaption>${heading}</figcaption>` : ""}`);
-        return element(node, "section", `${node.title ? `<header>${heading}</header>` : ""}${content(node)}`, { "data-type": node.subType ?? "" });
+        // A generic container is a plain div; it has no semantic type to name.
+        if (node.subType === undefined) return element(node, "div", `${node.title ? `<header>${heading}</header>` : ""}${content(node)}`);
+        return element(node, "section", `${node.title ? `<header>${heading}</header>` : ""}${content(node)}`, { "data-type": node.subType });
       }
       case "table": return element(node, "table", `${node.title ? `<caption>${title(node)}</caption>` : ""}${content(node)}`);
       case "tableRow": return element(node, "tr", content(node));
       case "tableCell": return element(node, node.header ? "th" : "td", content(node), { ...(node.colSpan !== undefined ? { colspan: node.colSpan } : {}), ...(node.rowSpan !== undefined ? { rowspan: node.rowSpan } : {}) });
       default: throw new ConversionError("unsupported-html-node", `No HTML transformer for node ${node.type}.`);
     }
+  }
+  // A tight block's paragraphs render without <p>, as CommonMark's tight list items do.
+  function unwrapped(node: Node, lines = false): string {
+    return join((node.body ?? []).filter(child => child?.type !== "footnoteDefinition"), child => child.type === "paragraph" && child.id === undefined && !child.attributes ? content(child) : render(child), lines);
   }
   function render(node: Node): string {
     if (!node || typeof node !== "object" || typeof node.type !== "string") throw new ConversionError("unsupported-html-node", "Expected an HTML-renderable node.");
@@ -150,5 +261,8 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
     } finally { active.delete(node); }
   }
   // Include custom output in the same sanitization pass as the built-in output.
-  return sanitizeHtml(render(document), options);
+  const normalized = normalizeTags(render(document));
+  const html = sanitizeHtml(normalized.html, diagnostics, options.trustedHtml);
+  // oxlint-disable-next-line no-control-regex -- the markers are control characters by design.
+  return hook ? html.replace(/\u0002([^\u0002\u0003]*)\u0003/g, (_run, run: string) => hook(run)).replace(/[\u0002\u0003]/g, "") : html;
 }

@@ -11,16 +11,19 @@ The benign default tags are `address article aside footer header h1 h2 h3 h4 h5 
 hgroup main nav section blockquote dd div dl dt figcaption figure hr li menu ol p
 pre ul a abbr b bdi bdo br cite code data dfn em i kbd mark q rb rp rt rtc ruby s samp
 small span strong sub sup time u var wbr caption col colgroup table tbody td tfoot
-th thead tr`. The profile additionally accepts `img`, `details` and `summary`.
-Unknown wrappers are removed while retaining ordinary text. Script, style,
-textarea, option, iframe, object, embed, SVG, MathML and template subtrees are
-removed entirely when disallowed. Comments are not retained.
+th thead tr`. The profile additionally accepts `img`, `details`, `summary`,
+`picture` and `source`. Authored HTML the profile disallows is shown as text, as
+GitHub's tag filter shows it, and reports `html-element-escaped`:
+`<input type="checkbox">` renders as `&lt;input type="checkbox"&gt;`, and a
+disallowed script's content shows as text too. Disallowed tags in transformer
+output are removed. Comments are not retained.
 
 | Scope | Accepted attributes |
 | --- | --- |
 | Every accepted tag | `id class style title lang dir data-* aria-*` |
 | Link | `href name target rel` |
 | Image | `src alt width height loading` |
+| Image source | `srcset media type width height` |
 | Disclosure | `open` |
 | Ordered list / list item | `start` / `value` |
 | Table cells | `colspan rowspan headers`; header cells also `scope` |
@@ -78,3 +81,44 @@ profile conventions. They do not introduce new Expressive Markdown punctuation.
 `presentation-filtered` diagnostics report normalization/filtering. Sanitization
 can normalize harmless spelling as well as remove rejected content, so these
 warnings do not imply every normalized input was dangerous.
+
+## Trusted host content
+
+The safe profile above is the default and the right choice for anything a
+visitor, contributor or other site could have written. A documentation site
+whose pages are written only by its own authors can opt into trusted host
+content, so components and page styles written in Markdown reach the output.
+
+**Trust boundary:** use it only for content the site owner authors and reviews.
+Never use it for user-submitted, imported or third-party content. Trusted HTML
+can carry anything the allowlist admits.
+
+```ts
+import { parse, stringify } from "expressmark";
+import { renderHtml } from "expressmark/render";
+
+const document = parse(source, { trustedHtml: true });
+const html = renderHtml(document, {
+  trustedHtml: {
+    tags: ["demo-card", "template", "button", "input"],
+    attributes: { "demo-card": ["tone"], template: ["component"], input: ["type", "checked", "disabled"] },
+    styles: { color: [/^light-dark\(#[\da-f]+, #[\da-f]+\)$/i], "--shiki-dark": [/^#[\da-f]{3,8}$/i] },
+  },
+});
+stringify(document, { trustedHtml: true }); // raw HTML written back verbatim
+```
+
+- `parse` and `stringify` with `trustedHtml: true` keep raw HTML blocks and
+  inline tags as opaque `html` nodes, verbatim: `<template component>`, custom
+  elements, `<link rel="component">`, `<style>`, head elements and scripts.
+- `renderHtml` still filters its whole output, built-in, raw and transformer
+  HTML alike. `trustedHtml` adds the host's elements, per-element attributes,
+  style properties with value patterns, and URL schemes to the profile. An
+  allowlisted element keeps its content.
+- Attribute names are exact, or a named prefix ending in `-*`. Wildcards that
+  could match event handlers are rejected. An event-handler attribute such as
+  `onclick` is admitted only when listed by name, and the `javascript` scheme
+  only when listed in `schemes`. Both run script, so list them only when the
+  content is trusted with script.
+- Allowlisted style patterns are the host's responsibility: a pattern that
+  admits `url()` admits network requests.

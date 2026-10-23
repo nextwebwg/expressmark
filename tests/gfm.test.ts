@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { semantic } from "./semantic.js";
 
 // Original implementation fixtures organized by https://github.github.com/gfm/.
 // Assert our document AST, not GFM's HTML: Expressmark does not render HTML and
 // applies Expressive Markdown's extensions and safe-HTML policy over that base.
-interface Case { name: string; source: string; body: Node[] }
+interface Case { name: string; source: string; body: Node[]; codes?: string[] }
 const paragraph = (value: string): Node => ({type:"paragraph",value});
 const text = (value: string): Node => ({type:"text",value});
 const item = (value: string): Node => ({type:"listItem",body:[paragraph(value)]});
@@ -13,14 +14,15 @@ const row = (...children: Node[]): Node => ({type:"tableRow",children});
 
 function cases(section: string, examples: Case[]): void {
   describe(section, () => {
-    it.each(examples)("$name", ({source,body}) => {
+    it.each(examples)("$name", ({source,body,codes}) => {
       const diagnostics: Diagnostic[] = [];
       const expected: Document = {type:"document",version:1,body};
       const document = parse(source,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-      expect(document).toEqual(expected);
+      expect(semantic(document)).toEqual(expected);
       const output = stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-      expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(expected);
-      expect(diagnostics).toEqual([]);
+      expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
+      expect(stringify(parse(output))).toBe(output);
+      expect(diagnostics.map(diagnostic=>diagnostic.code)).toEqual(codes ?? []);
     });
   });
 }
@@ -45,7 +47,7 @@ cases("GFM 4: leaf blocks", [
 cases("GFM 4.10: tables", [
   {name:"table headers and data cells",source:"| Planet | Moon |\n| --- | --- |\n| Earth | Luna |",body:[{type:"table",children:[row(cell("Planet",true),cell("Moon",true)),row(cell("Earth"),cell("Luna"))]}]},
   {name:"outer pipes are optional",source:"Planet | Moon\n--- | ---\nEarth | Luna",body:[{type:"table",children:[row(cell("Planet",true),cell("Moon",true)),row(cell("Earth"),cell("Luna"))]}]},
-  {name:"left center right and default column alignment",source:"| A | B | C | D |\n| :--- | :---: | ---: | --- |\n| a | b | c | d |",body:[{type:"table",align:["left","center","right",null],children:[row(cell("A",true),cell("B",true),cell("C",true),cell("D",true)),row(cell("a"),cell("b"),cell("c"),cell("d"))]}]},
+  {name:"logical start center end and default column alignment",source:"| A | B | C | D |\n| :--- | :---: | ---: | --- |\n| a | b | c | d |",body:[{type:"table",align:["start","center","end",null],children:[row(cell("A",true),cell("B",true),cell("C",true),cell("D",true)),row(cell("a"),cell("b"),cell("c"),cell("d"))]}]},
   {name:"short body rows pad and long rows truncate",source:"A | B\n--- | ---\none\ntwo | three | discarded",body:[{type:"table",children:[row(cell("A",true),cell("B",true)),row(cell("one"),cell("")),row(cell("two"),cell("three"))]}]},
   {name:"header-only table",source:"A | B\n--- | ---",body:[{type:"table",children:[row(cell("A",true),cell("B",true))]}]},
   {name:"inline formatting and escaped pipes stay inside cells",source:"| Label | Value |\n| --- | --- |\n| **bold** | `a\\|b` |",body:[{type:"table",children:[row(cell("Label",true),cell("Value",true)),row({type:"tableCell",children:[{type:"strong",value:"bold"}]},{type:"tableCell",children:[{type:"inlineCode",value:"a|b"}]})]}]},
@@ -98,9 +100,9 @@ cases("Expressive precedence over the GFM base", [
 cases("GFM 6: links, images and autolinks", [
   {name:"inline link with a title and formatted label",source:'[Read **this**](https://example.com/guide "Guide")',body:[{type:"paragraph",children:[{type:"link",url:"https://example.com/guide",title:"Guide",children:[text("Read "),{type:"strong",value:"this"}]}]}]},
   {name:"balanced parentheses in a link destination",source:"[API](https://example.com/api(v2))",body:[{type:"paragraph",children:[{type:"link",url:"https://example.com/api(v2)",value:"API"}]}]},
-  {name:"full reference link resolves a later definition case insensitively",source:'[Guide][DOC]\n\n[doc]: /guide "Read me"',body:[{type:"paragraph",children:[{type:"link",url:"/guide",title:"Read me",value:"Guide"}]}]},
-  {name:"collapsed and shortcut references",source:"[Guide][] and [Guide]\n\n[Guide]: /guide",body:[{type:"paragraph",children:[{type:"link",url:"/guide",value:"Guide"},text(" and "),{type:"link",url:"/guide",value:"Guide"}]}]},
-  {name:"the first duplicate reference definition wins",source:"[Guide]\n\n[Guide]: /first\n[Guide]: /second",body:[{type:"paragraph",children:[{type:"link",url:"/first",value:"Guide"}]}]},
+  {name:"full reference link keeps its label and a later definition stays in place",source:'[Guide][DOC]\n\n[doc]: /guide "Read me"',body:[{type:"paragraph",children:[{type:"linkReference",label:"DOC",referenceType:"full",value:"Guide"}]},{type:"definition",label:"doc",url:"/guide",title:"Read me"}]},
+  {name:"collapsed and shortcut references",source:"[Guide][] and [Guide]\n\n[Guide]: /guide",body:[{type:"paragraph",children:[{type:"linkReference",label:"Guide",referenceType:"collapsed",value:"Guide"},text(" and "),{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]},{type:"definition",label:"Guide",url:"/guide"}]},
+  {name:"duplicate reference definitions are both kept",source:"[Guide]\n\n[Guide]: /first\n[Guide]: /second",body:[{type:"paragraph",children:[{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]},{type:"definition",label:"Guide",url:"/first"},{type:"definition",label:"Guide",url:"/second"}],codes:["duplicate-definition","duplicate-definition"]},
   {name:"unresolved references remain literal",source:"[Missing][unknown]",body:[paragraph("[Missing][unknown]")]},
   {name:"image alt text and title",source:'![Moon map](moon.png "Lunar atlas")',body:[{type:"paragraph",children:[{type:"image",url:"moon.png",alt:"Moon map",title:"Lunar atlas"}]}]},
   {name:"angle URL autolink",source:"<https://example.com/guide>",body:[{type:"paragraph",children:[{type:"link",url:"https://example.com/guide",value:"https://example.com/guide"}]}]},

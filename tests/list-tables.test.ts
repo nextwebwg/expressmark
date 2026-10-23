@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { semantic } from "./semantic.js";
 
 const p = (value: string): Node => ({type:"paragraph",value});
 const cell = (value: string, header = false): Node => ({type:"tableCell",value,...(header ? {header:true}:{})});
@@ -10,7 +11,7 @@ const source = (body: string, settings = ""): string => `::: table${settings ? `
 function check(markdown: string, expected: Node[]): Document {
   const diagnostics: Diagnostic[]=[];
   const document=parse(markdown,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(document).toEqual({type:"document",version:1,body:expected});
+  expect(semantic(document)).toEqual({type:"document",version:1,body:expected});
   const output=stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
   expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
   expect(diagnostics).toEqual([]);
@@ -106,21 +107,21 @@ describe("positional list tables",()=> {
     check(`- Item\n\n${input.split('\n').map(line=>`  ${line}`).join('\n')}`,[{type:"list",ordered:false,tight:false,children:[{type:"listItem",body:[p("Item"),table(row(cell("A"),cell("B")))]}]}]);
   });
   it("resolves cell references defined after the table",()=> {
-    check(`${source('- - [Guide]')}\n\n[Guide]: /guide`,[table(row({type:"tableCell",children:[{type:"link",url:"/guide",value:"Guide"}]}))]);
+    check(`${source('- - [Guide]')}\n\n[Guide]: /guide`,[table(row({type:"tableCell",children:[{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]})),{type:"definition",label:"Guide",url:"/guide"}]);
   });
 });
 
 describe("table settings and merges",()=> {
   it("transposes named headers into the first displayed column",()=> {
-    check(source('- Name: Alpha\n  Status: Ready','{transpose align="left,right"}'),[
-      {...table(row(cell("Name",true),cell("Alpha")),row(cell("Status",true),cell("Ready"))),align:["left","right"]},
+    check(source('- Name: Alpha\n  Status: Ready','{transpose align="start,end"}'),[
+      {...table(row(cell("Name",true),cell("Alpha")),row(cell("Status",true),cell("Ready"))),align:["start","end"]},
     ]);
   });
   it("expands a single displayed alignment",()=> {
     check(source('- - A\n  - B','{!header align=center}'),[{...table(row(cell("A"),cell("B"))),align:["center","center"]}]);
   });
   it("keeps explicit default alignments",()=> {
-    check(source('- - A\n  - B','{align="-, right"}'),[{...table(row(cell("A"),cell("B"))),align:[null,"right"]}]);
+    check(source('- - A\n  - B','{align="-, end"}'),[{...table(row(cell("A"),cell("B"))),align:[null,"end"]}]);
   });
   it("resolves rectangular merges before transposing",()=> {
     const merged={...cell("Wide"),colSpan:2,rowSpan:2};
@@ -153,7 +154,9 @@ describe("malformed list-table recovery",()=> {
     ['string transpose setting','- - A','{transpose=false}'],
     ['boolean alignment','- - A','{align}'],
     ['unknown alignment','- - A','{align=justify}'],
-    ['wrong alignment width','- - A\n  - B','{align="left,right,center"}'],
+    ['physical left alignment','- - A','{align=left}'],
+    ['physical right alignment','- - A','{align=right}'],
+    ['wrong alignment width','- - A\n  - B','{align="start,end,center"}'],
     ['dangling right merge','- - A\n  - >',''],
     ['first-row vertical merge','- - ^',''],
     ['header-crossing merge','- - Header\n\n- - ^','{header}'],
@@ -195,4 +198,16 @@ it("derives named output from edited headers without rematching values",()=> {
   const output=stringify(document);
   expect(output).toContain('Renamed\\: field:');
   expect(parse(output)).toEqual(document);
+});
+
+it("writes single-line named cells compactly and keeps rich bodies indented",()=> {
+  const document=parse(source('- Name: Ada\n  Status: Ready: yes'));
+  const output=stringify(document);
+  expect(output).toContain('- Name: Ada\n  Status: Ready: yes');
+  expect(parse(output)).toEqual(document);
+  const rich=parse(source('- Notes:\n    First paragraph.\n\n    Second paragraph.'));
+  const richOutput=stringify(rich);
+  expect(richOutput).toMatch(/- Notes:\n    First paragraph\.\n[ \t]*\n    Second paragraph\./);
+  expect(rich.body[0]!.children![1]!.children![0]).toMatchObject({type:"tableCell",body:[{type:"paragraph",value:"First paragraph."},{type:"paragraph",value:"Second paragraph."}]});
+  expect(parse(richOutput)).toEqual(rich);
 });
