@@ -96,8 +96,9 @@ export function readListTable(container: Node, source: string, md: MarkdownIt, p
       return {type:"tableCell",body};
     }
     if(root.length) {
-      if(root.length !== 1 || root[0]!.token.type !== "bullet_list_open") invalid("A table body must contain one unordered list.");
-      for(const [index,item] of root[0]!.children.entries()) {
+      // Blank lines between rows keep one table, though `modern` syntax splits the list there.
+      if(root.some(block=>block.token.type !== "bullet_list_open")) invalid("A table body must contain one unordered list.");
+      for(const [index,item] of root.flatMap(list=>list.children).entries()) {
         const value=itemSource(source,item);
         const firstLine=value.split("\n")[0]!;
         const isNamed=!/^(?:[-+*])(?:[ \t]|$)/.test(firstLine) && Boolean(readTableField(firstLine));

@@ -42,13 +42,14 @@ export function referenceOrder(document: Document, notes: ReadonlyMap<string, No
   return order;
 }
 
-/** Link reference definitions by normalized label; the first definition wins. */
-export function linkDefinitions(document: Node): Map<string, Node> {
+/** Link reference definitions by normalized label: the last wins in `modern` syntax, the first in `compatible`. */
+export function linkDefinitions(document: Document | Node): Map<string, Node> {
+  const last = (document as Document).syntax === "modern";
   const definitions = new Map<string, Node>();
   walk(document, node => {
     if (node.type !== "definition" || typeof node.label !== "string") return;
     const label = normalizeLabel(node.label);
-    if (!definitions.has(label)) definitions.set(label, node);
+    if (last || !definitions.has(label)) definitions.set(label, node);
   }, false);
   return definitions;
 }

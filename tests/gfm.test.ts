@@ -5,7 +5,7 @@ import { semantic } from "./semantic.js";
 // Original implementation fixtures organized by https://github.github.com/gfm/.
 // Assert our document AST, not GFM's HTML: Expressmark does not render HTML and
 // applies Expressive Markdown's extensions and safe-HTML policy over that base.
-interface Case { name: string; source: string; body: Node[] }
+interface Case { name: string; source: string; body: Node[]; codes?: string[] }
 const paragraph = (value: string): Node => ({type:"paragraph",value});
 const text = (value: string): Node => ({type:"text",value});
 const item = (value: string): Node => ({type:"listItem",body:[paragraph(value)]});
@@ -14,7 +14,7 @@ const row = (...children: Node[]): Node => ({type:"tableRow",children});
 
 function cases(section: string, examples: Case[]): void {
   describe(section, () => {
-    it.each(examples)("$name", ({source,body}) => {
+    it.each(examples)("$name", ({source,body,codes}) => {
       const diagnostics: Diagnostic[] = [];
       const expected: Document = {type:"document",version:1,body};
       const document = parse(source,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
@@ -22,7 +22,7 @@ function cases(section: string, examples: Case[]): void {
       const output = stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
       expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
       expect(stringify(parse(output))).toBe(output);
-      expect(diagnostics).toEqual([]);
+      expect(diagnostics.map(diagnostic=>diagnostic.code)).toEqual(codes ?? []);
     });
   });
 }
@@ -102,7 +102,7 @@ cases("GFM 6: links, images and autolinks", [
   {name:"balanced parentheses in a link destination",source:"[API](https://example.com/api(v2))",body:[{type:"paragraph",children:[{type:"link",url:"https://example.com/api(v2)",value:"API"}]}]},
   {name:"full reference link keeps its label and a later definition stays in place",source:'[Guide][DOC]\n\n[doc]: /guide "Read me"',body:[{type:"paragraph",children:[{type:"linkReference",label:"DOC",referenceType:"full",value:"Guide"}]},{type:"definition",label:"doc",url:"/guide",title:"Read me"}]},
   {name:"collapsed and shortcut references",source:"[Guide][] and [Guide]\n\n[Guide]: /guide",body:[{type:"paragraph",children:[{type:"linkReference",label:"Guide",referenceType:"collapsed",value:"Guide"},text(" and "),{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]},{type:"definition",label:"Guide",url:"/guide"}]},
-  {name:"duplicate reference definitions are both kept",source:"[Guide]\n\n[Guide]: /first\n[Guide]: /second",body:[{type:"paragraph",children:[{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]},{type:"definition",label:"Guide",url:"/first"},{type:"definition",label:"Guide",url:"/second"}]},
+  {name:"duplicate reference definitions are both kept",source:"[Guide]\n\n[Guide]: /first\n[Guide]: /second",body:[{type:"paragraph",children:[{type:"linkReference",label:"Guide",referenceType:"shortcut",value:"Guide"}]},{type:"definition",label:"Guide",url:"/first"},{type:"definition",label:"Guide",url:"/second"}],codes:["duplicate-definition","duplicate-definition"]},
   {name:"unresolved references remain literal",source:"[Missing][unknown]",body:[paragraph("[Missing][unknown]")]},
   {name:"image alt text and title",source:'![Moon map](moon.png "Lunar atlas")',body:[{type:"paragraph",children:[{type:"image",url:"moon.png",alt:"Moon map",title:"Lunar atlas"}]}]},
   {name:"angle URL autolink",source:"<https://example.com/guide>",body:[{type:"paragraph",children:[{type:"link",url:"https://example.com/guide",value:"https://example.com/guide"}]}]},

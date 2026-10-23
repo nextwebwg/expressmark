@@ -15,6 +15,8 @@ const { parse, stringify } = await import(new URL("dist/index.js", targetRoot));
 
 const samples = Number(process.env.BENCH_SAMPLES ?? 7);
 const durationMs = Number(process.env.BENCH_DURATION_MS ?? 100);
+// The syntax the expressmark tasks parse and write with; a baseline without modes ignores it.
+const options = process.env.BENCH_SYNTAX ? { syntax: process.env.BENCH_SYNTAX } : {};
 assert(Number.isInteger(samples) && samples >= 3, "BENCH_SAMPLES must be an integer >= 3");
 assert(Number.isFinite(durationMs) && durationMs >= 10, "BENCH_DURATION_MS must be >= 10");
 const readFixture = name => readFileSync(new URL(`./fixtures/${name}.md`, import.meta.url), "utf8");
@@ -42,15 +44,15 @@ function measure(run, milliseconds) {
 const results = [];
 for (const fixture of fixtures) {
   const { source } = fixture;
-  const doc = parse(source);
+  const doc = parse(source, options);
   assert.equal(doc.type, "document");
   const original = JSON.stringify(doc);
-  const canonical = stringify(doc);
-  assert.equal(stringify(parse(canonical)), canonical, `${fixture.name}: canonical round trip changed`);
+  const canonical = stringify(doc, options);
+  assert.equal(stringify(parse(canonical, options), options), canonical, `${fixture.name}: canonical round trip changed`);
   const tasks = [
-    { operation: "parse", library: "expressmark", run: () => parse(source) },
-    { operation: "stringify", library: "expressmark", run: () => stringify(doc) },
-    { operation: "round-trip", library: "expressmark", run: () => stringify(parse(source)) },
+    { operation: "parse", library: "expressmark", run: () => parse(source, options) },
+    { operation: "stringify", library: "expressmark", run: () => stringify(doc, options) },
+    { operation: "round-trip", library: "expressmark", run: () => stringify(parse(source, options), options) },
   ];
   let checkMdast = () => {};
   if (fixture.common) {

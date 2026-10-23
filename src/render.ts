@@ -1,5 +1,5 @@
 import { headingAnchors } from "./anchors.js";
-import { escapeHtml, sanitizeHtml, type HtmlAllowlist } from "./html.js";
+import { allowedElement, escapeHtml, normalizeTags, rawTextElements, readStartTag, sanitizeHtml, voidElements, type HtmlAllowlist } from "./html.js";
 import { footnoteDefinitions, linkDefinitions, references, referenceOrder } from "./references.js";
 import { normalizeLabel } from "./grammar.js";
 import { sourceKey } from "./grammar.js";
@@ -58,6 +58,11 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   const diagnostics: ConversionOptions = options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {};
   const anchors = options.headingIds ? headingAnchors(document) : undefined;
   const tight: boolean[] = [];
+  // Authored HTML that the profile disallows is shown as text, as GitHub's tag filter shows it.
+  const allowed = (name: string) => allowedElement(name, options.trustedHtml);
+  const shownElement = (name: string) => warn(diagnostics, "html-element-escaped", `<${name}> is outside the safe HTML profile; it is shown as text.`);
+  const authored = (html: string) => { const result = normalizeTags(html, allowed, false); result.shown.forEach(shownElement); return result.html; };
+  const modernDocument = document.syntax === "modern";
   const hook = options.escapeText;
   function text(value: string): string {
     const escaped = escapeHtml(value);
@@ -79,7 +84,12 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   // Reference links resolve here, against the first definition of each label.
   const definitions = linkDefinitions(document);
   function content(node: Node): string {
-    return node.value != null ? text(node.value) : (node.body ?? node.children ?? []).filter(child => child?.type !== "footnoteDefinition").map(render).join("");
+    return node.value != null ? text(node.value) : join((node.body ?? node.children ?? []).filter(child => child?.type !== "footnoteDefinition"), render);
+  }
+  // Elements on their own lines keep the line break between them, as HTML
+  // does, so inline elements such as a row of badges stay apart.
+  function join(nodes: Node[], each: (node: Node) => string, lines = false): string {
+    return nodes.map((child, index) => `${index && (lines || child?.type === "htmlElement" && child.display === "block" && nodes[index - 1]?.type === "htmlElement" && nodes[index - 1]?.display === "block") ? "\n" : ""}${each(child)}`).join("");
   }
   function title(node: Node): string {
     return typeof node.title === "string" ? text(node.title) : node.title ? render(node.title) : "";
@@ -171,7 +181,8 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       }
       case "title": case "literal": return content(node);
       case "text": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "span", content(node)) : content(node);
-      case "html": return node.value ?? "";
+      // A closing tag never creates an element: a stray one, kept for writing, renders nothing.
+      case "html": return modernDocument && /^<\/[A-Za-z][A-Za-z0-9-]*[^>]*>$/.test(node.value ?? "") ? "" : authored(node.value ?? "");
       case "paragraph": return element(node, "p", content(node));
       case "heading":
         if (!Number.isInteger(node.level) || node.level! < 1 || node.level! > 6) throw new ConversionError("unsupported-html-node", "HTML headings need a level from 1 to 6.");
@@ -195,7 +206,20 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       }
       // Form controls are outside the safe profile, so task status stays inert.
       // A tight list's paragraphs render without <p>, as CommonMark's do.
-      case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${tight.at(-1) ? (node.body ?? []).filter(child => child?.type !== "footnoteDefinition").map(child => child.type === "paragraph" && child.id === undefined && !child.attributes ? content(child) : render(child)).join("") : content(node)}`);
+      case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${tight.at(-1) && node.tight !== false ? unwrapped(node) : content(node)}`);
+      // An element's paragraphs take `<p>` when blank lines separate its blocks.
+      // An unclosed element closes where its enclosing block ends.
+      case "htmlElement": {
+        const tag = node.tag ?? "";
+        const empty = voidElements.has(tag);
+        // The output is complete HTML: `</br>` is `<br>`, and `/>` closes a non-void element.
+        const start = node.open ?? "";
+        const open = start.startsWith("</") ? `<${tag}>` : !empty && readStartTag(start, 0)?.selfClosing ? start.slice(0, -2).trimEnd() + ">" : start;
+        const close = empty ? "" : node.close ?? `</${tag}>`;
+        const inner = node.value !== undefined ? rawTextElements.has(tag) && allowed(tag) ? node.value : text(node.value) : node.children ? content(node) : node.tight === false ? content(node) : unwrapped(node, true);
+        if (!allowed(tag)) { shownElement(tag); return `${text(node.open ?? "")}${inner}${node.close ? text(node.close) : ""}`; }
+        return `${open}${inner}${close}`;
+      }
       case "code": {
         const code = element(node, "pre", `<code${node.language ? ` class="language-${escapeHtml(node.language)}"` : ""}>${text(node.value ?? "")}</code>`);
         return node.title ? `<figure>${code}<figcaption>${title(node)}</figcaption></figure>` : code;
@@ -218,6 +242,10 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       default: throw new ConversionError("unsupported-html-node", `No HTML transformer for node ${node.type}.`);
     }
   }
+  // A tight block's paragraphs render without <p>, as CommonMark's tight list items do.
+  function unwrapped(node: Node, lines = false): string {
+    return join((node.body ?? []).filter(child => child?.type !== "footnoteDefinition"), child => child.type === "paragraph" && child.id === undefined && !child.attributes ? content(child) : render(child), lines);
+  }
   function render(node: Node): string {
     if (!node || typeof node !== "object" || typeof node.type !== "string") throw new ConversionError("unsupported-html-node", "Expected an HTML-renderable node.");
     if (active.has(node)) throw new ConversionError("cyclic-html-node", "Cannot render a cyclic node reference.");
@@ -233,7 +261,8 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
     } finally { active.delete(node); }
   }
   // Include custom output in the same sanitization pass as the built-in output.
-  const html = sanitizeHtml(render(document), diagnostics, options.trustedHtml);
+  const normalized = normalizeTags(render(document));
+  const html = sanitizeHtml(normalized.html, diagnostics, options.trustedHtml);
   // oxlint-disable-next-line no-control-regex -- the markers are control characters by design.
   return hook ? html.replace(/\u0002([^\u0002\u0003]*)\u0003/g, (_run, run: string) => hook(run)).replace(/[\u0002\u0003]/g, "") : html;
 }

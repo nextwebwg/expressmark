@@ -106,7 +106,12 @@ rendering is available from 0.1.2.
 
 ## What you can write
 
-- CommonMark blocks and inline content, plus GFM tables, tasks, strikethrough and autolinks.
+- Two syntaxes: `compatible`, the default, reads CommonMark 0.31.2 and GFM
+  blocks and inline content, including tables, tasks, strikethrough and
+  autolinks; `modern` reads the Expressive Markdown specification, with
+  Markdown inside HTML elements and no indented code. The `syntax` option
+  chooses, and a document's `markdownSyntax` frontmatter overrides it; see
+  [syntax](docs/syntax.md).
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
 - Nested colon containers, typeless generic containers, inline/leaf directives, open semantic types and shared string/flag attributes, including `#id` and `.class` shorthand.
 - Bracketed spans, `[text]{.note}`, for inline text with attributes. The longhand `{class="note" id="x"}` works the same as `{.note #x}`.
@@ -158,7 +163,7 @@ preferred form. Whitespace inside a construct and character escapes follow the
 writer's canonical form.
 
 Exported JSON types include `Document`, `Node`, `Attributes`, `Json`, `Position`,
-`Point`, `Diagnostic`, and `ConversionOptions`. Content uses exclusive `body`,
+`Point`, `Diagnostic`, `ConversionOptions` and `Syntax`. Content uses exclusive `body`,
 `children`, or `value` slots; `title` is a separate designated slot. The writer
 validates child contexts and merged table grids. Source positions are not
 currently generated.

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.15
+
+- Add the `modern` syntax, the Expressive Markdown specification, beside
+  `compatible`, the default, which reads CommonMark 0.31.2 and GFM. A
+  `syntax` option on `parse` and `stringify` chooses, a document's
+  `markdownSyntax` frontmatter overrides it, and `document.syntax` records
+  it. See [syntax](docs/syntax.md).
+- In `modern`, read HTML elements as `htmlElement` nodes whose content is
+  Markdown, matched as HTML matches tags, in both HTML profiles; read no
+  indented code, setext headings or trailing-space breaks; keep a code span's
+  pipes in its table cell; read no lazy continuation; continue a list when its
+  bullet or delimiter changes; read spaces in a link target that ends at its
+  balancing parenthesis; nest list items and footnote continuations by relative
+  indentation; split a list
+  at a blank line between items; and use the last of duplicate link
+  definitions.
+- In `modern`, end an unclosed element at its first blank line, never count
+  tags inside code spans or fences when finding an element's end, and keep a
+  raw-text element's content raw inside a paragraph too.
+- In both syntaxes, render `/>` as the complete element, close elements where
+  HTML's optional end tags close them, read `/` as HTML's tokenizer does, read
+  `</br>` as `<br>`, and ignore stray end tags, with diagnostics.
+- Show authored HTML outside the safe profile as text, as GitHub's tag filter
+  does, in place of removing it, and accept `picture` and `source`.
+- Report `duplicate-definition` for a link label defined more than once.
+- Keep a list table's rows in one table when blank lines separate them.
+- Add `BENCH_SYNTAX` to the benchmark suite.
+
 ## 0.1.14
 
 - Open a container for every colon fence. A header without a type, such as

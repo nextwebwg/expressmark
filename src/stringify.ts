@@ -1,7 +1,7 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
 import { alertMarker, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
-import { escapeHtml, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeHtml, sanitizeLiteral } from "./html.js";
+import { escapeHtml, rawTextElements, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
 import { footnoteDefinitions, linkDefinitions } from "./references.js";
@@ -29,13 +29,13 @@ function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {})
   return output.join("");
 }
 // Node field contracts, shared by every validation call.
-const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
-const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"];
+const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","open","close","syntax","version","metadata"]);
+const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","open","close","syntax","version","metadata"];
 const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
 const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition","strayFence"]);
 const structural: Record<string,string[]> = {
-    document:["version","metadata"], footnoteReference:["label"], footnoteDefinition:["label"],
-    container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
+    document:["version","metadata","syntax"], htmlElement:["tag","open","close","tight","display"], footnoteReference:["label"], footnoteDefinition:["label"],
+    container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked","tight"],
     link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
 };
 function validate(node: Node, path = "document", seen = new Set<Node>()): void {
@@ -83,8 +83,8 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.title != null && !["document","container","table","code","link","image","leaf","definition"].includes(node.type)) fail(`${path} does not define a title.`);
   if(["code","link","image","definition"].includes(node.type) && node.title != null && typeof node.title !== "string") fail(`${path}.title must be a string.`);
   if(["document","container","table","leaf"].includes(node.type) && node.title != null && (typeof node.title !== "object" || node.title.type !== "title")) fail(`${path}.title must be a title node.`);
-  const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "inline";
-  const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal"].includes(child.type) && child.display === "block";
+  const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal","htmlElement"].includes(child.type) && child.display === "inline";
+  const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal","htmlElement"].includes(child.type) && child.display === "block";
   if(node.body?.some(child=>!isBlock(child))) fail(`${path}.body needs block nodes.`);
   if(node.children && !["list","table","tableRow","group"].includes(node.type) && node.children.some(child=>!isInline(child))) fail(`${path}.children needs inline nodes.`);
   if(["link","image","definition"].includes(node.type) && typeof node.url !== "string") fail(`${path} needs a string URL.`);
@@ -94,6 +94,15 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.type === "group" && node.tag !== undefined && node.tag !== (node.display === "inline" ? "span":"div")) fail(`${path} native tag conflicts with its display.`);
   if(["link","linkReference"].includes(node.type) && node.children?.some(child=>["link","linkReference"].includes(child.type))) fail(`${path} cannot contain nested links.`);
   if(node.type === "tableRow" && node.children?.some(child=>child.type !== "tableCell")) fail(`${path} needs tableCell children.`);
+  if(node.type === "document" && (node as Document).syntax !== undefined && !["compatible","modern"].includes((node as Document).syntax!)) fail(`${path}.syntax needs compatible or modern.`);
+  if(node.type === "htmlElement") {
+    const tag=typeof node.tag === "string" && /^[A-Za-z][A-Za-z0-9-]*$/.test(node.tag) ? node.tag : fail(`${path} needs an element tag name.`);
+    // `</br>` is read as a `<br>` element.
+    if(typeof node.open !== "string" || !new RegExp(`^<${tag}(?=[\\s/>])[^<]*>$`,"i").test(node.open) && !(tag.toLowerCase() === "br" && /^<\/br[^<]*>$/i.test(node.open))) fail(`${path}.open needs the element's start tag.`);
+    if(node.close !== undefined && (typeof node.close !== "string" || !new RegExp(`^</${tag}[ \\t]*>$`,"i").test(node.close))) fail(`${path}.close needs the element's closing tag.`);
+    if(!["inline","block"].includes(node.display ?? "")) fail(`${path} needs inline or block display.`);
+    if(node.body && node.display !== "block") fail(`${path} holds blocks only with block display.`);
+  }
   seen.delete(node);
 }
 
@@ -136,10 +145,12 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   diagnoseIds(document,options);
   // Authored spellings recorded in `source`. Each is written back only while
   // it still reads as the node; otherwise the preferred spelling is written.
+  // Probes read source with the document's own syntax and profile.
+  const probeOptions: ConversionOptions={...(options.trustedHtml ? {trustedHtml:true}:{}),...(document.syntax === "modern" ? {syntax:"modern" as const}:{})};
   const spelling=(node: Node, key: string): string | undefined => typeof node.source?.[key] === "string" ? node.source[key] as string : undefined;
   const reads=(markdown: string, node: Node, pick: (document: Document)=>Node | undefined = document=>document.body[0], key?: string, holder: Node = node): boolean => {
     if(key && spellingHolds(originals.get(holder) ?? holder,holder,key)) return true;
-    try { const found=pick(parse(markdown,options.trustedHtml ? {trustedHtml:true}:{})); return found !== undefined && sameData(found,node); } catch { return false; }
+    try { const found=pick(parse(markdown,probeOptions)); return found !== undefined && sameData(found,node); } catch { return false; }
   };
   function attributes(node: Node, extra: Attributes = {}): string {
     const authored=spelling(node,"attributes");
@@ -198,6 +209,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "group") return wrapper(node.tag ?? (node.display === "inline" ? "span":"div"),(node.children ?? []).map(native).join(""));
     if(node.type === "blockquote") return wrapper("blockquote",(node.body ?? []).map(native).join(""));
     if(node.type === "list") return wrapper(node.ordered ? "ol":"ul",(node.children ?? []).map(native).join(""),node.start !== undefined ? {start:node.start}:{});
+    if(node.type === "htmlElement") return `${elementTag(node.open!)}${node.value !== undefined ? rawTextElements.has(node.tag!) ? node.value : escapeHtml(node.value) : [...(node.body ?? []),...(node.children ?? [])].map(native).join("")}${voidElements.has(node.tag!) ? "" : node.close ?? `</${node.tag}>`}`;
     if(node.type === "listItem") {
       if(node.checked !== undefined) fail("A styled task-list item has no lossless safe HTML mapping.");
       return wrapper("li",(node.body ?? []).map(native).join(""));
@@ -319,6 +331,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return `[^${node.label}]`;
     }
     if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeFragment(node.value ?? "",options); }
+    if(node.type === "htmlElement") return `${elementTag(node.open!)}${node.value !== undefined && rawTextElements.has(node.tag!) ? node.value : content(node)}${node.close ?? ""}`;
     if(node.type === "literal") return escapeText(node.value ?? "");
     fail(`Unsupported inline node: ${node.type}.`);
   }
@@ -359,12 +372,14 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const same=node.ordered && spelling(node,"numbering") === "same";
     return node.children.map((item,index)=> {
       if(item.id !== undefined || item.attributes) fail("List-item attributes need a native list wrapper.");
-      const prefix=node.ordered ? `${same ? start:start+index}${delimiter} `:`${bullet} `;
+      // An item's own bullet or delimiter, which `modern` syntax keeps in the list.
+      const own=document.syntax === "modern" ? spelling(item,"bullet"):undefined;
+      const prefix=node.ordered ? `${same ? start:start+index}${own === ")" || own === "." ? own:delimiter} `:`${own && "-*+".includes(own) ? own:bullet} `;
       const task=item.checked === undefined ? "" : `[${item.checked ? spelling(item,"marker") === "X" ? "X":"x":" "}] `;
       // Task markers are structural only at the start of a list item. A plain
       // paragraph or a heading can contain the same bracketed text unescaped.
-      const text=blockArray(item.body ?? [],node.tight === true).replace(/^\[([ xX])\](?=[ \t])/u,"\\[$1]");
-      return `${prefix}${task}${text.replace(/\n/g,`\n${" ".repeat(prefix.length)}`)}`;
+      const text=blockArray(item.body ?? [],node.tight === true && item.tight !== false).replace(/^\[([ xX])\](?=[ \t])/u,"\\[$1]");
+      return `${prefix}${task}${text.replace(/\n(?=[^\n])/g,`\n${" ".repeat(prefix.length)}`)}`;
     }).join(node.tight === true ? "\n":"\n\n");
   }
   function table(node: Node): string {
@@ -428,6 +443,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const heading=["table",node.title !== undefined ? `[${caption(node)}]`:undefined,writeAttributes(node,settings)].filter(Boolean).join(" ");
     return `${colons} ${heading}\n\n${body}${body ? "\n\n":""}${colons}`;
   }
+  const elementTag=(open: string) => options.trustedHtml || open.startsWith("</") ? open : sanitizeFragment(open,options);
   function block(node: Node, forceTabsWrapper = false): string {
     if(node.type === "paragraph") {
       const value=content(node);
@@ -474,6 +490,22 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return text.split("\n").map(value=>`> ${value}`).join("\n");
     }
     if(node.type === "list") return list(node);
+    if(node.type === "htmlElement") {
+      const authored=spelling(node,"markdown");
+      if(authored && reads(authored,node,undefined,"markdown")) return authored;
+      if(!node.body) return `${elementTag(node.open!)}${node.value ?? ""}${node.close ?? ""}`;
+      // Blank lines inside the element give its paragraphs `<p>`. A tight
+      // element's blocks are written line by line while that reads back.
+      const wrap=(gap: string, body: string) => `${elementTag(node.open!)}${body ? `${gap}${body}`:""}${node.close === undefined ? "" : `${body ? gap:""}${node.close}`}`;
+      if(node.tight !== false) {
+        const body=node.body ?? [];
+        const lines=wrap("\n",body.map(child=>block(child)).filter(Boolean).join("\n"));
+        // Only text after a paragraph can join it; other lines keep their blocks.
+        const joins=body.some((child,index)=>index>0 && body[index-1]!.type === "paragraph" && ["paragraph","htmlElement"].includes(child.type));
+        if(!joins || reads(lines,node)) return lines;
+      }
+      return wrap("\n\n",blockArray(node.body ?? []));
+    }
     if(node.type === "container" || node.type === "leaf") {
       // Only a container may omit its type; a leaf directive names one.
       if(!(node.type === "container" && node.subType === undefined) && !/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
@@ -555,8 +587,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     metadata.title=caption({type:"document",title:document.title});
   }
   if(document.attributes && Object.keys(document.attributes).length) fail("Root attributes have no core frontmatter mapping.");
+  // A syntax other than the host's default is written as the `markdownSyntax` key.
+  if(document.syntax !== undefined && document.syntax !== (options.syntax ?? "compatible")) metadata.markdownSyntax=document.syntax;
   const authoredYaml=spelling(document,"frontmatter");
-  const keepYaml=authoredYaml !== undefined && reads(`---\n${authoredYaml}\n---\n`,{type:"document",body:[],...(document.id !== undefined ? {id:document.id}:{}),...(document.title !== undefined ? {title:document.title}:{}),...(document.metadata ? {metadata:document.metadata}:{})} as Node,parsed=>({...parsed,version:undefined,body:[]} as unknown as Node),"frontmatter",document);
+  const keepYaml=authoredYaml !== undefined && reads(`---\n${authoredYaml}\n---\n`,{type:"document",body:[],...(document.id !== undefined ? {id:document.id}:{}),...(document.title !== undefined ? {title:document.title}:{}),...(document.metadata ? {metadata:document.metadata}:{}),...(document.syntax ? {syntax:document.syntax}:{})} as Node,parsed=>({...parsed,version:undefined,body:[]} as unknown as Node),"frontmatter",document);
   const head=keepYaml ? `---\n${authoredYaml}\n---\n\n` : Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";
   const body=blockArray(document.body);
   return `${head}${body}${head || body ? "\n":""}`;

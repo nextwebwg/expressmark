@@ -11,16 +11,19 @@ The benign default tags are `address article aside footer header h1 h2 h3 h4 h5 
 hgroup main nav section blockquote dd div dl dt figcaption figure hr li menu ol p
 pre ul a abbr b bdi bdo br cite code data dfn em i kbd mark q rb rp rt rtc ruby s samp
 small span strong sub sup time u var wbr caption col colgroup table tbody td tfoot
-th thead tr`. The profile additionally accepts `img`, `details` and `summary`.
-Unknown wrappers are removed while retaining ordinary text. Script, style,
-textarea, option, iframe, object, embed, SVG, MathML and template subtrees are
-removed entirely when disallowed. Comments are not retained.
+th thead tr`. The profile additionally accepts `img`, `details`, `summary`,
+`picture` and `source`. Authored HTML the profile disallows is shown as text, as
+GitHub's tag filter shows it, and reports `html-element-escaped`:
+`<input type="checkbox">` renders as `&lt;input type="checkbox"&gt;`, and a
+disallowed script's content shows as text too. Disallowed tags in transformer
+output are removed. Comments are not retained.
 
 | Scope | Accepted attributes |
 | --- | --- |
 | Every accepted tag | `id class style title lang dir data-* aria-*` |
 | Link | `href name target rel` |
 | Image | `src alt width height loading` |
+| Image source | `srcset media type width height` |
 | Disclosure | `open` |
 | Ordered list / list item | `start` / `value` |
 | Table cells | `colspan rowspan headers`; header cells also `scope` |

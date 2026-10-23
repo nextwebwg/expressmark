@@ -3,9 +3,10 @@ import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
-import { htmlNodes, sanitizeFragment, sanitizeHtml, sanitizeLiteral, unmatchedTags } from "./html.js";
+import { htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
-import type { ConversionOptions, Document, Json, Node } from "./types.js";
+import { installModern, modernRules, type ModernRule } from "./modern.js";
+import type { ConversionOptions, Document, Json, Node, Syntax } from "./types.js";
 import { warn } from "./types.js";
 
 function line(state: StateBlock, index: number): string {
@@ -47,6 +48,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   spelled=false;
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
+  // The `modern` rules in force, known once the frontmatter is read.
+  const modern=new Set<ModernRule>();
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
   const lexicalMd=new MarkdownIt({html:true});
   // Per block state: table cells parse their own sources.
@@ -163,7 +166,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     footnotes.add(match[1]!);
     state.push("footnote_open","",1).meta={label:match[1]};
     // Read the note like a list item: its first line starts after the marker,
-    // and its continuation lines are indented four columns past the marker.
+    // and its continuation lines are indented four columns past the marker, or
+    // in `modern` syntax, past the marker by any amount, as list nesting is.
     const saved={bMark:state.bMarks[start]!,tShift:state.tShift[start]!,sCount:state.sCount[start]!,parentType:state.parentType};
     let position=begin+match[0].length;
     const contentStart=position;
@@ -176,12 +180,13 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.tShift[start]=position-contentStart;
     state.sCount[start]=offset-initial;
     state.bMarks[start]=contentStart;
-    state.blkIndent+=4;
+    const outer=state.blkIndent;
+    state.blkIndent=modern.has("relativeLists") ? saved.sCount+1 : outer+4;
     state.parentType="footnote" as typeof state.parentType;
     if(state.sCount[start]! < state.blkIndent) state.sCount[start]!+=state.blkIndent;
     state.md.block.tokenize(state,start,end);
     state.parentType=saved.parentType;
-    state.blkIndent-=4;
+    state.blkIndent=outer;
     state.tShift[start]=saved.tShift; state.sCount[start]=saved.sCount; state.bMarks[start]=saved.bMark;
     state.push("footnote_close","",-1);
     return true;
@@ -202,9 +207,12 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     try { matched=referenceRule(state,start,end,silent); } finally { env.references=outer; }
     if(!matched || silent) return matched;
     const [key,value]=Object.entries(own)[0]!;
-    if(!(key in outer)) outer[key]=value;
     // markdown-it's own token keeps only the normalized label; record the authored one.
     const raw=/^\[((?:\\[\s\S]|[^\\[\]])*)\]:/.exec(state.getLines(start,state.line,state.blkIndent,false).trimStart())!;
+    if(key in outer) {
+      warn(options,"duplicate-definition",`Link reference [${raw[1]}] is defined more than once; the ${modern.has("lastDefinition") ? "last":"first"} definition is used.`);
+      if(modern.has("lastDefinition")) outer[key]=value;
+    } else outer[key]=value;
     state.tokens.at(-1)!.meta={label:raw[1],url:value.href,title:value.title,markdown:state.getLines(start,state.line,state.blkIndent,false).trim()};
     return true;
   });
@@ -418,6 +426,54 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   function spellAttributes(node: Node, authored: unknown): void {
     if(typeof authored === "string" && authored !== writeAttributes(node)) spell(node,"attributes",authored);
   }
+  // An HTML element as a node. The safe profile filters its start tag, and an
+  // element it disallows is shown as text, as GitHub's tag filter shows it.
+  function elementNodes(name: string, open: string, close: string | undefined, display: "inline" | "block", slot: {body?: Node[]; children?: Node[]; value?: string}): Node[] {
+    let kept=open;
+    if(!options.trustedHtml && !open.startsWith("</")) {
+      kept=sanitizeFragment(open,options);
+      if(!kept.trim()) {
+        warn(options,"html-element-escaped",`<${name}> is outside the safe HTML profile; it is shown as text.`);
+        const text=(value: string): Node => ({type:"literal",display,value});
+        return [text(open),...(slot.body ?? slot.children ?? (slot.value ? [text(slot.value)]:[])),...(close ? [text(close)]:[])];
+      }
+    }
+    const node: Node={type:"htmlElement",display,tag:name,open:kept,...(close ? {close}:{})};
+    // Links do not nest: inside `<a>`, a link's text stands for the link.
+    const unlink=(nodes: Node[]): Node[] => nodes.flatMap(child => ["link","linkReference"].includes(child.type) ? (child.children ? unlink(child.children) : [{type:"text",value:child.value ?? ""}]) : [child.children ? {...child,children:unlink(child.children)} : child.body ? {...child,body:unlink(child.body)} : child]);
+    if(name === "a") { if(slot.body) slot.body=unlink(slot.body); if(slot.children) slot.children=unlink(slot.children); }
+    if(slot.body) node.body=slot.body;
+    else if(slot.children) compact(node,slot.children);
+    else if(slot.value !== undefined) node.value=slot.value;
+    return [node];
+  }
+  // A `modern` HTML tag within inline content, matched as HTML matches tags.
+  function inlineElement(tokens: Token[], at: number, lineBlock: boolean): {nodes: Node[]; next: number} {
+    const raw=tokens[at]!.content;
+    const end=/^<\/([A-Za-z][A-Za-z0-9-]*)[^>]*>$/.exec(raw);
+    if(end) {
+      if(end[1]!.toLowerCase() === "br") { warn(options,"br-end-tag","</br> is read as <br>; write <br>."); return {nodes:elementNodes("br",raw,undefined,"inline",{}),next:at+1}; }
+      // A closing tag never creates an element: a stray one is ignored.
+      warn(options,"stray-end-tag",`${raw} closes no open element; it is ignored.`);
+      return {nodes:[{type:"html",display:"inline",value:raw}],next:at+1};
+    }
+    const tag=/^<[A-Za-z]/.test(raw) ? readStartTag(raw,0) : undefined;
+    if(!tag) return {nodes:options.trustedHtml ? [{type:"html",display:"inline",value:raw}] : htmlNodes(raw,"inline",options),next:at+1};
+    if(voidElements.has(tag.name) || tag.selfClosing) return {nodes:elementNodes(tag.name,raw,undefined,"inline",{}),next:at+1};
+    const open=new TagStack(tag.name);
+    let index=at+1, closed=-1, implied=false;
+    for(;index<tokens.length;index++) {
+      const content=tokens[index]!.content;
+      if(tokens[index]!.type !== "html_inline") continue;
+      const closing=/^<\/([A-Za-z][A-Za-z0-9-]*)/.exec(content);
+      if(closing) { if(open.end(closing[1]!.toLowerCase())) { closed=index; break; } continue; }
+      const inner=/^<[A-Za-z]/.test(content) ? readStartTag(content,0) : undefined;
+      if(inner && open.start(inner.name,inner.selfClosing)) { implied=true; break; }
+    }
+    if(closed<0 && !implied && !parentEndCloses.has(tag.name)) warn(options,"unclosed-html-element",`<${tag.name}> has no closing tag; it ends with its paragraph.`);
+    const inner=tokens.slice(at+1,index);
+    return {nodes:elementNodes(tag.name,raw,closed<0 ? undefined:tokens[closed]!.content,"inline",{children:inlineTokens(inner,lineBlock)}),next:closed<0 ? index:closed+1};
+  }
   function inlineTokens(tokens: Token[], lineBlock = false): Node[] {
     let cursor=0;
     function read(until?:string): Node[] {
@@ -459,7 +515,11 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const node=compact({type},read(token.type.replace("_open","_close")));
           if(token.markup.startsWith("_")) spell(node,"marker","_");
           nodes.push(node);
-        } else if(token.type === "html_inline" && options.trustedHtml) nodes.push({type:"html",display:"inline",value:token.content});
+        } else if(token.type === "html_raw_inline") {
+          const meta=token.meta as {name:string;open:string;close?:string;value:string};
+          nodes.push(...elementNodes(meta.name,meta.open,meta.close,"inline",{value:meta.value}));
+        } else if(token.type === "html_inline" && modern.has("html")) { const found=inlineElement(tokens,cursor-1,lineBlock); nodes.push(...found.nodes); cursor=found.next; }
+        else if(token.type === "html_inline" && options.trustedHtml) { if(/^<\/br[\s>]/i.test(token.content)) warn(options,"br-end-tag","</br> is read as <br>; write <br>."); nodes.push({type:"html",display:"inline",value:token.content}); }
         else if(token.type === "html_inline") {
           const open=/^<([a-z][\w:-]*)\b[^>]*>$/i.exec(token.content);
           if(open && !/\/\s*>$/.test(token.content) && !["br","img","hr","wbr"].includes(open[1]!.toLowerCase())) {
@@ -577,13 +637,16 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
             if(item.type === "paragraph_open" && item.level === token.level+2 && !item.hidden) loose=true;
             if(item.type === "list_item_open" && item.level === token.level+1 && items++ && item.info !== tokens[listStart]!.info) same=false;
           }
-          node.tight=!loose;
+          // A `modern` list splits at a blank line, so only its items can be loose.
+          node.tight=modern.has("looseLists") || !loose;
           if(token.markup !== (node.ordered ? ".":"-")) spell(node,"marker",token.markup);
           if(node.ordered && items>1 && same) spell(node,"numbering","same");
           nodes.push(node);
         } else if(token.type === "list_item_open") {
           const body=read("list_item_close");
           const node: Node={type:"listItem",body};
+          if(token.meta?.loose) node.tight=false;
+          if(token.meta?.marker) spell(node,"bullet",token.meta.marker as string);
           const first=body[0];
           if(first?.type === "paragraph") {
             const text=first.value ?? (first.children?.[0]?.type === "text" ? first.children[0].value : undefined);
@@ -623,9 +686,34 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           // at a blank line, stays HTML; rendering nests the Markdown between.
           const value=token.content.trimEnd();
           const unmatched=unmatchedTags(value);
-          if(options.trustedHtml) nodes.push({type:"html",display:"block",value});
+          if(!token.meta?.stray && /<\/br[\s>]/i.test(value)) warn(options,"br-end-tag","</br> is read as <br>; write <br>.");
+          if(token.meta?.stray) nodes.push({type:"html",display:"block",value});
+          else if(options.trustedHtml) nodes.push({type:"html",display:"block",value});
           else if(unmatched.opens.length || unmatched.closes.length) { const clean=sanitizeFragment(value,options); if(clean.trim()) nodes.push({type:"html",display:"block",value:clean}); }
           else nodes.push(...htmlNodes(value,"block",options));
+        }
+        else if(token.type === "html_element") {
+          // The element's content is Markdown, read as its own block context.
+          // Blank lines between its blocks give its paragraphs `<p>`.
+          const meta=token.meta as {name:string;open:string;close?:string;content?:string;value?:string};
+          if(meta.content === undefined) { nodes.push(...elementNodes(meta.name,meta.open,meta.close,"block",meta.value === undefined ? {}:{value:meta.value})); continue; }
+          // Indentation inside an element carries no meaning: its common indentation is removed.
+          const lines=meta.content.split("\n");
+          const indent=Math.min(...lines.slice(1).filter(text=>text.trim()).map(text=>/^[ \t]*/.exec(text)![0].length));
+          const content=Number.isFinite(indent) && indent ? [lines[0],...lines.slice(1).map(text=>text.slice(Math.min(indent,/^[ \t]*/.exec(text)![0].length)))].join("\n") : meta.content;
+          const inner=md.parse(content,env);
+          const body=blocks(inner,content);
+          const covered=new Set<number>();
+          for(const child of inner) if(child.level === 0 && child.map) for(let index=child.map[0];index<child.map[1];index++) covered.add(index);
+          const loose=lines.some((text,index)=>index>0 && index<lines.length-1 && !text.trim() && !covered.has(index));
+          const made=elementNodes(meta.name,meta.open,meta.close,"block",{body});
+          const node=made[0]!;
+          if(node.type === "htmlElement") {
+            if(loose) node.tight=false;
+            // The safe profile records the authored source only when it holds no nested HTML to filter.
+            if(options.trustedHtml || node.open === meta.open && !meta.content.includes("<")) spell(node,"markdown",`${node.open}${meta.content}${meta.close ?? ""}`);
+          }
+          nodes.push(...made);
         }
         else if(token.type === "expressive_container_open") {
           // Titles are read after the block pass so they can refer to any footnote.
@@ -718,6 +806,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     return read();
   }
   let documentTitle: string | undefined;
+  let frontSyntax: Syntax | undefined;
   const front=/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(source);
   if(front) {
     const value=front[1]!;
@@ -757,6 +846,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(map.title !== undefined && typeof map.title !== "string") throw new Error("Frontmatter title must be a string.");
       if(map.description !== undefined && typeof map.description !== "string") throw new Error("Frontmatter description must be a string.");
       if(map.tags !== undefined && (!Array.isArray(map.tags) || !map.tags.every(tag=>typeof tag === "string"))) throw new Error("Frontmatter tags must be a string list.");
+      if(map.markdownSyntax !== undefined) {
+        if(map.markdownSyntax === "modern" || map.markdownSyntax === "compatible") { frontSyntax=map.markdownSyntax; delete map.markdownSyntax; }
+        else warn(options,"invalid-syntax","Frontmatter markdownSyntax must be modern or compatible; it was kept as metadata.");
+      }
       if(typeof map.id === "string") { document.id=map.id; delete map.id; }
       if(typeof map.title === "string") { documentTitle=map.title; delete map.title; }
       if(Object.keys(map).length) document.metadata=map;
@@ -767,6 +860,13 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(!valid) recoveredFrontmatter={type:"literal",display:"block",value:sanitizeHtml(front[0].trimEnd(),options)};
     source=source.slice(front[0].length);
   }
+  const syntax: Syntax=frontSyntax ?? options.syntax ?? "compatible";
+  if(syntax === "modern") {
+    // `modernRules` selects single rules for measurement; documents use them all.
+    for(const rule of (options as {modernRules?: readonly ModernRule[]}).modernRules ?? modernRules) modern.add(rule);
+    installModern(md,lexicalMd,modern,options);
+  }
+  if(syntax === "modern" || frontSyntax) document.syntax=syntax;
   document.body=normalizeTabs(blocks(md.parse(source,env),source));
   if(documentTitle !== undefined) document.title=compact({type:"title"},inline(documentTitle));
   const notes=footnoteDefinitions(document);
@@ -792,6 +892,13 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     return recorded;
   };
   if(spelled) fences(document);
+  // CommonMark's HTML blocks can split an element, so stray end tags are found across the document.
+  if(!modern.has("html")) {
+    const values: string[]=[];
+    const collect=(node: Node): void => { if(node.type === "html" && node.value) values.push(node.value); for(const child of node.body ?? node.children ?? []) collect(child); };
+    collect(document);
+    for(const stray of normalizeTags(values.join("")).strays) warn(options,"stray-end-tag",`${stray} closes no open element; it is ignored.`);
+  }
   diagnoseIds(document,options);
   return document;
 }
