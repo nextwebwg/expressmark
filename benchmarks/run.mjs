@@ -24,6 +24,8 @@ const fixtures = [
   { name: "guide", source: prose, common: true },
   { name: "long-guide", source: prose.repeat(64), common: true },
   { name: "expressive", source: readFixture("expressive"), common: false },
+  // Many sibling containers: container scanning must stay linear in the document.
+  { name: "containers", source: Array.from({ length: 1000 }, (_, i) => `::: note [Note ${i}]\nText **${i}**.\n:::`).join("\n\n"), common: false },
 ];
 const markdownIt = new MarkdownIt("commonmark");
 const commonmarkParser = new commonmark.Parser();

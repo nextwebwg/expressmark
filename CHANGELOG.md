@@ -30,6 +30,36 @@
 - Write classes as `.class` and IDs as `#id`, the spec's preferred spellings,
   as in `{.wide #intro}`, unless a value needs quoting. Authored `class=` and
   `id=` spellings work the same and are kept.
+
+## 0.1.13
+
+- Keep a link reference definition whose title spans lines; `parse` threw
+  "An attribute value cannot contain a newline or NUL" (CommonMark example 196).
+- Parse every README in a 398-document corpus of popular projects, and write
+  each one back, in both HTML profiles.
+- Advance past a mention, directive or attribute list matched while a link's
+  label is scanned; markdown-it stopped with "inline rule didn't increment
+  state.pos".
+- Map safe HTML within its context: inline HTML blocks become paragraphs, a
+  block inside inline HTML stays inline HTML, a table cell holding blocks gets
+  a block body, and a lone table row stays block HTML.
+- Collapse whitespace in HTML titles such as `<summary>`, keep an HTML table
+  whose spans form no rectangle as HTML, and write a multiline image or link
+  tooltip as native HTML.
+- Write a tight list item's blocks without a blank line between a paragraph
+  and a block that interrupts it, so the list stays tight.
+- Keep an element's opening and closing tags as authored when CommonMark puts
+  them in separate HTML blocks, such as a `<div>` or `<details>` around
+  Markdown between blank lines. Rendering nests the Markdown inside, and
+  `stringify` writes the tags back unchanged. Raw HTML passes CommonMark
+  0.31.2's 64 HTML-block and raw-HTML examples, and GFM's apart from three
+  that CommonMark 0.31 or GFM's output filter supersede.
+- End a container with its enclosing block, so content after an unclosed
+  container in a list item stays in place.
+- Scan containers in linear time, reading each block context's code and HTML
+  boundaries once. A thousand containers parse in milliseconds; the benchmark
+  suite measures them as `containers`.
+
 ## 0.1.12
 
 - Render a tight list's items without `<p>`, as CommonMark does.
