@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.18
+
+- Update Parseman to 0.55.2 and markdown-it to 15.0.3. Every corpus README and
+  CommonMark and GFM example still writes back byte for byte.
+
 ## 0.1.17
 
 - Write an unedited document back byte for byte, in both syntaxes and HTML

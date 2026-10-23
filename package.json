@@ -1,6 +1,6 @@
 {
   "name": "expressmark",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Parse and write Expressive Markdown with its document AST.",
   "license": "MIT",
   "type": "module",
@@ -60,7 +60,7 @@
   "dependencies": {
     "htmlparser2": "12.0.0",
     "markdown-it": "15.0.3",
-    "parseman": "0.54.0",
+    "parseman": "0.55.2",
     "sanitize-html": "2.18.1",
     "yaml": "2.9.1"
   }
