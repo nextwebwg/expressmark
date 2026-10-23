@@ -88,6 +88,6 @@ describe("preferred forms", () => {
     const document = parse("## Deploy {#deploy & open}\n\n::::warning[Careful]{#c}\nBody.\n::::\n");
     document.body[0]!.attributes = {open:false};
     document.body[1]!.title = {type:"title",value:"Changed"};
-    expect(stringify(document)).toBe("## Deploy {id=\"deploy\" !open}\n\n:::: warning [Changed] {id=\"c\"}\nBody.\n::::\n");
+    expect(stringify(document)).toBe("## Deploy {#deploy !open}\n\n:::: warning [Changed] {#c}\nBody.\n::::\n");
   });
 });

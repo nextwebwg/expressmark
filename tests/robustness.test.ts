@@ -61,7 +61,8 @@ describe("containers end with their enclosing block", () => {
     expect(semantic(parse("- item\n  ::: note\n  x\n\n# Heading outside").body).at(-1)).toEqual({type:"heading",level:1,value:"Heading outside"});
   });
   it("leaves a fence outside the list item to its own block", () => {
-    expect(semantic(parse("- item\n  ::: note\n  x\n:::\n\nAfter").body).map(node => node.type)).toEqual(["list","paragraph","paragraph"]);
+    // A bare fence with no closing line of its own is a stray fence.
+    expect(semantic(parse("- item\n  ::: note\n  x\n:::\n\nAfter").body).map(node => node.type)).toEqual(["list","strayFence","paragraph"]);
   });
   it("closes a container at its own fence inside the item", () => {
     expect(semantic(parse("- item\n  ::: note\n  x\n  :::\n- next").body[0]?.children?.[0]?.body?.[1])).toEqual({type:"container",subType:"note",body:[{type:"paragraph",value:"x"}]});

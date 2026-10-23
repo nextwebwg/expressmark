@@ -256,6 +256,34 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       return true;
     });
   }
+  // `[text]{attributes}` is a bracketed span when the bracket is no link. It
+  // runs after the link rule, so links and resolving references keep their
+  // lists; `![…]` stays image syntax and `[^…]` footnote syntax.
+  md.inline.ruler.after("link","bracketed_span",(state: StateInline,silent: boolean) => {
+    // Link-label scans see the bracket as text; a span forms when the link's
+    // own content is parsed, so a span may sit inside link text.
+    if(silent || state.src[state.pos] !== "[" || state.src[state.pos+1] === "^") return false;
+    // A bracket after an unescaped `!`, `@` or `:name` has the image, mention or
+    // inline-type shape, and one right after `]` belongs to a reference's form;
+    // when that construct does not form, its source stays text.
+    const shape=/(\\*)(?:[!@\]]|:[A-Za-z][A-Za-z0-9_-]*)$/.exec(state.src.slice(Math.max(0,state.pos-64),state.pos));
+    if(shape && shape[1]!.length%2 === 0) return false;
+    const label=readLabel(state.src.slice(state.pos)); if(!label) return false;
+    const attributesStart=state.pos+label.length;
+    let cursor=attributesStart;
+    const lists: NonNullable<ReturnType<typeof readAttributes>>[]=[];
+    while(state.src[cursor] === "{") { const attrs=readAttributes(state.src.slice(cursor),silent ? {}:options); if(!attrs) break; lists.push(attrs); cursor+=attrs.length; }
+    if(!lists.length) return false;
+    if(!silent) {
+      const node=compact({type:"inline"},inline(label.value));
+      for(const attrs of lists) attach(node,attrs);
+      const authored=state.src.slice(attributesStart,cursor);
+      if(authored !== writeAttributes(node)) spell(node,"attributes",authored);
+      state.push("expressive_inline","",0).meta={node};
+    }
+    state.pos=cursor;
+    return true;
+  });
   md.inline.ruler.before("link","footnote_reference",(state: StateInline,silent: boolean) => {
     if(state.src[state.pos] !== "[" || state.src[state.pos+1] !== "^") return false;
     const label=tokenHandle(state.src.slice(state.pos+2));
@@ -269,17 +297,26 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   md.block.ruler.before("fence","expressive_container",(state,start,end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
     const opening=/^(:{3,})(.*)$/.exec(line(state,start)); if(!opening) return false;
-    const node=readHeader(opening[2]!,options,true); if(!node) return false;
+    // Every colon fence opens a container. A header that cannot be read gives
+    // a generic container keeping the raw header, so writing restores it.
     // The header keeps its spacing after the colons.
     const header=opening[2]!.trimEnd();
+    const parsed=readHeader(opening[2]!,silent ? {}:options,true);
+    // An unreadable header keeps the type it names; `source.rest` keeps what follows.
+    const named=parsed ? undefined : tokenIdentifier(header.trimStart());
+    const node: Node=parsed ?? (named && named.toLowerCase() !== "table" ? {type:"container",subType:named.toLowerCase(),body:[]} : {type:"container",body:[]});
     const label=typeof node.title === "object" ? node.title.value : undefined;
-    if(header !== " "+[node.subType,label === undefined ? undefined : node.titleSpelling === "unbracketed" ? label : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ")) spell(node,"header",header);
+    const parts=[node.subType,label === undefined ? undefined : node.titleSpelling === "unbracketed" ? label : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ");
+    if(!parsed) spell(node,"rest",node.subType ? header.trimStart().slice(named!.length) : header);
+    else if(header !== (parts ? ` ${parts}`:"")) spell(node,"header",header);
+    if(!parsed && !silent) warn(options,"invalid-container-header",`The container header "${header.trim()}" could not be read; it is kept as written.`);
     spell(node,"fence",opening[1]!.length);
     if(silent) return true;
     const length=opening[1]!.length;
     // A container ends with its enclosing block, such as a list item: its last
     // line comes before the first nonblank line indented less than that block.
     if(state.blkIndent>0) for(let index=start+1;index<end;index++) if(!state.isEmpty(index) && state.sCount[index]!<state.blkIndent) { end=index; break; }
+    const bare=!header.trim();
     let close=start+1;
     let code: {mark:string;length:number}|undefined;
     // Let CommonMark locate code/HTML in list and quote contexts too. Jump at
@@ -312,26 +349,43 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       const ending=/^(:{3,})[ \t]*$/.exec(text);
       if(ending && ending[1]!.length === length) break;
       if(ending && ending[1]!.length > length) break;
+      // A bare fence's closing line must come before another opening fence of
+      // its length or longer; otherwise that line closes the other container.
+      const opener=bare ? /^(:{3,})[ \t]*\S/.exec(text) : null;
+      if(opener && opener[1]!.length >= length) { close=end; break; }
     }
-    if(close === end || !new RegExp(`^:{${length}}[ \\t]*$`).test(line(state,close))) {
-      const token=state.push("expressive_literal","",0);
-      token.map=[start,end];
-      token.content=sanitizeHtml(state.getLines(start,end,state.blkIndent,false).replace(/\n+$/,""),options);
-      warn(options,"unclosed-container","An unclosed or mismatched container is preserved as literal source.");
-      state.line=end; return true;
+    const closed=close < end && new RegExp(`^:{${length}}[ \\t]*$`).test(line(state,close));
+    if(!closed && bare) {
+      // A stray bare fence is one line: kept so it round-trips, rendering nothing.
+      const stray=state.push("stray_fence","",0); stray.content=line(state,start).trim(); stray.map=[start,start+1];
+      warn(options,"stray-fence","A bare colon fence has no closing line; it is kept as a stray fence.");
+      state.line=start+1; return true;
     }
+    if(!closed) warn(options,"unclosed-container","A container has no closing line; it runs to the end of its enclosing block.");
+    const after=closed ? close+1 : close;
     if(node.subType === "table") {
       const body=state.getLines(start+1,close,state.blkIndent,false);
-      const table=state.push("expressive_table","",0); table.meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()}; table.map=[start,close+1];
-      state.line=close+1; return true;
+      const table=state.push("expressive_table","",0); table.meta={node,body,source:state.getLines(start,after,state.blkIndent,false).trimEnd()}; table.map=[start,after];
+      state.line=after; return true;
     }
-    const token=state.push("expressive_container_open","",1); token.meta={node}; token.map=[start,close+1];
+    const token=state.push("expressive_container_open","",1); token.meta={node}; token.map=[start,after];
     const oldParent=state.parentType;
     state.parentType="container";
+    // Like a code fence's, a fence's own indentation leaves each enclosed line.
+    const indent=state.sCount[start]!-state.blkIndent;
+    const saved: [number,number,number,number][]=[];
+    if(indent>0) for(let index=start+1;index<close;index++) {
+      const spaces=/^ */.exec(state.src.slice(state.bMarks[index]!,state.bMarks[index]!+indent))![0].length;
+      const strip=Math.min(spaces,indent,state.tShift[index]!);
+      if(!strip) continue;
+      saved.push([index,state.bMarks[index]!,state.tShift[index]!,state.sCount[index]!]);
+      state.bMarks[index]!+=strip; state.tShift[index]!-=strip; state.sCount[index]!-=strip;
+    }
     state.md.block.tokenize(state,start+1,close);
+    for(const [index,bMark,tShift,sCount] of saved) { state.bMarks[index]=bMark; state.tShift[index]=tShift; state.sCount[index]=sCount; }
     state.parentType=oldParent;
     state.push("expressive_container_close","",-1);
-    state.line=close+1; return true;
+    state.line=after; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
   md.block.ruler.before("paragraph","expressive_leaf",(state,start,_end,silent) => {
     if(state.sCount[start]! - state.blkIndent >= 4) return false;
@@ -626,7 +680,16 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(first?.type === "paragraph") {
             const text=first.value ?? (first.children?.[0]?.type === "text" ? first.children[0].value : undefined);
             const task=tasks.get(first);
-            if(task) { node.checked=task[1]!.toLowerCase() === "x"; if(task[1] === "X") spell(node,"marker","X"); if(first.value !== undefined) first.value=first.value.slice(task[0].length); else first.children![0]!.value=text!.slice(task[0].length); }
+            if(task) {
+              node.checked=task[1]!.toLowerCase() === "x";
+              if(task[1] === "X") spell(node,"marker","X");
+              if(first.value !== undefined) first.value=first.value.slice(task[0].length);
+              else {
+                // The marker leaves no empty text node before the item's content.
+                const rest=text!.slice(task[0].length);
+                if(rest) first.children![0]!.value=rest; else first.children!.shift();
+              }
+            }
           }
           nodes.push(node);
         } else if(token.type === "fence" || token.type === "code_block") {
@@ -716,6 +779,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           defined.add(label);
           nodes.push({type:"footnoteDefinition",label,body:read("footnote_close")});
         }
+        else if(token.type === "stray_fence") nodes.push({type:"strayFence",value:token.content});
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
         else if(token.type === "expressive_line_block") {
           const node=compact({type:"lineBlock"},inline(token.content,true));
