@@ -6,8 +6,9 @@ import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, re
 import { htmlNodes, normalizeTags, parentEndCloses, rawTextElements, readStartTag, sanitizeFragment, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installModern, modernRules, type ModernRule } from "./modern.js";
-import type { ConversionOptions, Document, Json, Node, Syntax } from "./types.js";
-import { warn } from "./types.js";
+import type { ConversionOptions, Document, Json, Node, Position, Syntax } from "./types.js";
+import { linting, warn } from "./types.js";
+import { lint } from "./lint.js";
 
 function line(state: StateBlock, index: number): string {
   return state.src.slice(state.bMarks[index]! + state.tShift[index]!, state.eMarks[index]);
@@ -50,6 +51,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   const document: Document = {type:"document",version:1,body:[]};
   // The `modern` rules in force, known once the frontmatter is read.
   const modern=new Set<ModernRule>();
+  // Lint warnings report the source lines of the block holding each construct.
+  const positions=new WeakMap<Node,Position>();
+  let lineOffset=0;
   const md = new MarkdownIt({html:true,linkify:true,typographer:false});
   const lexicalMd=new MarkdownIt({html:true});
   // Per block state: table cells parse their own sources.
@@ -164,7 +168,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(!match || tokenHandle(match[1]!) !== match[1]) return false;
     if(silent) return true;
     footnotes.add(match[1]!);
-    state.push("footnote_open","",1).meta={label:match[1]};
+    const opened=state.push("footnote_open","",1); opened.meta={label:match[1]}; opened.map=[start,start+1];
     // Read the note like a list item: its first line starts after the marker,
     // and its continuation lines are indented four columns past the marker.
     const saved={bMark:state.bMarks[start]!,tShift:state.tShift[start]!,sCount:state.sCount[start]!,parentType:state.parentType};
@@ -313,10 +317,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     if(node.subType === "table") {
       const body=state.getLines(start+1,close,state.blkIndent,false);
-      state.push("expressive_table","",0).meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()};
+      const table=state.push("expressive_table","",0); table.meta={node,body,source:state.getLines(start,close+1,state.blkIndent,false).trimEnd()}; table.map=[start,close+1];
       state.line=close+1; return true;
     }
-    const token=state.push("expressive_container_open","",1); token.meta={node};
+    const token=state.push("expressive_container_open","",1); token.meta={node}; token.map=[start,close+1];
     const oldParent=state.parentType;
     state.parentType="container";
     state.md.block.tokenize(state,start+1,close);
@@ -333,7 +337,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const header=match[1]!.trimEnd();
     const label=typeof node.title === "object" ? node.title.value : undefined;
     if(header !== [node.subType,label === undefined ? undefined : `[${label}]`,writeAttributes(node)].filter(Boolean).join(" ")) spell(node,"header",header);
-    state.push("expressive_leaf","",0).meta={node};
+    const leaf=state.push("expressive_leaf","",0); leaf.meta={node}; leaf.map=[start,start+1];
     state.line=start+1; return true;
   },{alt:["paragraph","reference","blockquote","list"]});
   md.block.ruler.before("paragraph","expressive_line_block",(state,start,end,silent) => {
@@ -357,6 +361,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       break;
     }
     const token=state.push("expressive_line_block","",0);
+    token.map=[start,cursor];
     token.content=lines.join("\n");
     const authored=state.getLines(start,cursor,state.blkIndent,false).trimEnd();
     if(authored !== lines.map(value=>value ? `| ${value}`:"|").join("\n")) token.meta={markdown:authored};
@@ -395,7 +400,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const raw=tokens[at]!.content;
     const end=/^<\/([A-Za-z][A-Za-z0-9-]*)[^>]*>$/.exec(raw);
     if(end) {
-      if(end[1]!.toLowerCase() === "br") { warn(options,"br-end-tag","</br> is read as <br>; write <br>."); return {nodes:elementNodes("br",raw,undefined,"inline",{}),next:at+1}; }
+      if(end[1]!.toLowerCase() === "br") { if(linting(options.lint,"br-end-tag")) options.onDiagnostic?.({code:"br-end-tag",message:"</br> is read as <br>; write <br>.",severity:"warning",preferred:"<br>"}); return {nodes:elementNodes("br",raw,undefined,"inline",{}),next:at+1}; }
       // A closing tag never creates an element: a stray one is ignored.
       warn(options,"stray-end-tag",`${raw} closes no open element; it is ignored.`);
       return {nodes:[{type:"html",display:"inline",value:raw}],next:at+1};
@@ -460,7 +465,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(token.markup.startsWith("_")) spell(node,"marker","_");
           nodes.push(node);
         } else if(token.type === "html_inline" && modern.has("html")) { const found=inlineElement(tokens,cursor-1,lineBlock); nodes.push(...found.nodes); cursor=found.next; }
-        else if(token.type === "html_inline" && options.trustedHtml) { if(/^<\/br[\s>]/i.test(token.content)) warn(options,"br-end-tag","</br> is read as <br>; write <br>."); nodes.push({type:"html",display:"inline",value:token.content}); }
+        else if(token.type === "html_inline" && options.trustedHtml) { if(/^<\/br[\s>]/i.test(token.content)) if(linting(options.lint,"br-end-tag")) options.onDiagnostic?.({code:"br-end-tag",message:"</br> is read as <br>; write <br>.",severity:"warning",preferred:"<br>"}); nodes.push({type:"html",display:"inline",value:token.content}); }
         else if(token.type === "html_inline") {
           const open=/^<([a-z][\w:-]*)\b[^>]*>$/i.exec(token.content);
           if(open && !/\/\s*>$/.test(token.content) && !["br","img","hr","wbr"].includes(open[1]!.toLowerCase())) {
@@ -512,11 +517,19 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     let cursor=0;
     let sourceLines: string[] | undefined;
     const lineAt=(index: number)=>(sourceLines ??= original.split("\n"))[index] ?? "";
+    // The block nodes a token made take its source lines, for lint positions.
+    const place=(nodes: Node[], at: number, map: [number,number] | null | undefined)=> {
+      if(!map || original !== source) return;
+      for(const node of nodes.slice(at)) if(!positions.has(node)) positions.set(node,{start:{line:map[0]+lineOffset+1,column:1},end:{line:map[1]+lineOffset,column:lineAt(map[1]-1).length+1}});
+    };
     function read(until?:string): Node[] {
       const nodes: Node[]=[];
+      let made: {at: number; map: [number,number] | null} | undefined;
       while(cursor<tokens.length) {
+        if(made && options.lint) place(nodes,made.at,made.map);
         const token=tokens[cursor++]!;
         if(token.type === until) break;
+        made={at:nodes.length,map:token.map};
         if(token.type === "paragraph_open" || token.type === "heading_open") {
           const inner=tokens[cursor++]!;
           let content=inner.content;
@@ -580,6 +593,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           }
           // A `modern` list splits at a blank line, so only its items can be loose.
           node.tight=modern.has("looseLists") || !loose;
+          // Lint: indentation that mixes tabs and spaces, between items or within one.
+          if(options.lint && !modern.has("relativeLists") && original === source && linting(options.lint,"mixed-indentation")) {
+            const lead=(index: number)=>/^[ \t]*/.exec(lineAt(index))![0];
+            const unrelated=(a: string, b: string)=>!a.startsWith(b) && !b.startsWith(a);
+            const items=tokens.slice(listStart,cursor).filter(item=>item.type === "list_item_open" && item.level === token.level+1 && item.map);
+            const first=items[0] ? lead(items[0].map![0]) : "";
+            if(items.some(item=>unrelated(lead(item.map![0]),first) || Array.from({length:item.map![1]-item.map![0]-1},(_,offset)=>item.map![0]+1+offset).some(index=>lineAt(index).trim() && unrelated(lead(index),lead(item.map![0])))))
+              warn(options,"mixed-indentation","A list mixes tabs and spaces in its indentation; tabs count to the next multiple of four columns.");
+          }
           if(token.markup !== (node.ordered ? ".":"-")) spell(node,"marker",token.markup);
           if(node.ordered && items>1 && same) spell(node,"numbering","same");
           nodes.push(node);
@@ -618,7 +640,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           // at a blank line, stays HTML; rendering nests the Markdown between.
           const value=token.content.trimEnd();
           const unmatched=unmatchedTags(value);
-          if(!token.meta?.stray && /<\/br[\s>]/i.test(value)) warn(options,"br-end-tag","</br> is read as <br>; write <br>.");
+          if(!token.meta?.stray && /<\/br[\s>]/i.test(value)) if(linting(options.lint,"br-end-tag")) options.onDiagnostic?.({code:"br-end-tag",message:"</br> is read as <br>; write <br>.",severity:"warning",preferred:"<br>"});
           if(token.meta?.stray) nodes.push({type:"html",display:"block",value});
           else if(options.trustedHtml) nodes.push({type:"html",display:"block",value});
           else if(unmatched.opens.length || unmatched.closes.length) { const clean=sanitizeFragment(value,options); if(clean.trim()) nodes.push({type:"html",display:"block",value:clean}); }
@@ -732,6 +754,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           }
         }
       }
+      if(made && options.lint) place(nodes,made.at,made.map);
       return nodes;
     }
     return read();
@@ -789,6 +812,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(!duplicateKeys) spell(document,"frontmatter",value);
     } catch(error) { valid=false; warn(options,"invalid-frontmatter",error instanceof Error ? error.message : "Unsupported YAML frontmatter."); }
     if(!valid) recoveredFrontmatter={type:"literal",display:"block",value:sanitizeHtml(front[0].trimEnd(),options)};
+    lineOffset=front[0].split("\n").length-1;
     source=source.slice(front[0].length);
   }
   const syntax: Syntax=frontSyntax ?? options.syntax ?? "compatible";
@@ -831,6 +855,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     for(const stray of normalizeTags(values.join("")).strays) warn(options,"stray-end-tag",`${stray} closes no open element; it is ignored.`);
   }
   diagnoseIds(document,options);
+  if(options.lint) lint(document,positions,options);
   return document;
 }
 

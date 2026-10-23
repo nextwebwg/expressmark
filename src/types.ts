@@ -59,7 +59,14 @@ export interface Diagnostic {
   code: string;
   message: string;
   severity: "warning";
+  /** The lines of the block that holds the construct, for a lint warning. */
+  position?: Position;
+  /** The preferred form, for a lint warning. */
+  preferred?: string;
 }
+/** `true` turns every lint rule on; a map turns rules on, except those set to `false`. */
+export type LintOption = boolean | Readonly<Record<string, boolean>>;
+export const linting = (option: LintOption | undefined, code: string): boolean => option === true || typeof option === "object" && option !== null && option[code] !== false;
 export interface ConversionOptions {
   onDiagnostic?: (diagnostic: Diagnostic) => void;
   /**
@@ -70,6 +77,10 @@ export interface ConversionOptions {
   trustedHtml?: boolean;
   /** The syntax for documents whose frontmatter sets none. Default `compatible`. */
   syntax?: Syntax;
+  /** `parse`: report spellings other than the preferred form, as lint warnings. */
+  lint?: LintOption;
+  /** `stringify`: write the preferred form of every spelling the lint rules flag. */
+  preferredForms?: boolean;
 }
 export class ConversionError extends Error {
   readonly code: string;

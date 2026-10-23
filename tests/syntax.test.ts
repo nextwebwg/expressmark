@@ -11,9 +11,9 @@ const normalize = (html: string) => html.replace(/>\s+</g, "><").trim();
 function render(markdown: string, syntax: Syntax = "modern", options: ConversionOptions = {}): string {
   return normalize(renderHtml(parse(markdown, { syntax, trustedHtml: true, ...options }), { trustedHtml: allow }));
 }
-function codes(markdown: string, syntax: Syntax = "modern"): string[] {
+function codes(markdown: string, syntax: Syntax = "modern", options: ConversionOptions = {}): string[] {
   const seen: string[] = [];
-  parse(markdown, { syntax, trustedHtml: true, onDiagnostic: diagnostic => seen.push(diagnostic.code) });
+  parse(markdown, { syntax, trustedHtml: true, ...options, onDiagnostic: diagnostic => seen.push(diagnostic.code) });
   return seen;
 }
 // `stringify` writes each document back as authored.
@@ -151,12 +151,13 @@ describe("stray end tags", () => {
     expect(codes("</div>\n\nText", "compatible")).toEqual(["stray-end-tag"]);
     roundTrips("a </span> b");
   });
-  it("reads </br> as <br>, with a diagnostic, in both syntaxes", () => {
+  it("reads </br> as <br>, with a lint warning, in both syntaxes", () => {
     const excalidraw = '<h2 align="center">\n  An open source virtual hand-drawn style whiteboard. </br>\n  Collaborative and end-to-end encrypted. </br>\n<br />\n</h2>';
     expect(render(excalidraw)).toBe('<h2 align="center">An open source virtual hand-drawn style whiteboard. <br />\nCollaborative and end-to-end encrypted. <br /><br /></h2>');
     expect(render(excalidraw, "compatible")).toContain("whiteboard. <br />");
-    expect(codes("line one</br>\nline two")).toEqual(["br-end-tag"]);
-    expect(codes("line one</br>\nline two", "compatible")).toEqual(["br-end-tag"]);
+    expect(codes("line one</br>\nline two", "modern", { lint: true })).toEqual(["br-end-tag"]);
+    expect(codes("line one</br>\nline two", "compatible", { lint: true })).toEqual(["br-end-tag"]);
+    expect(codes("line one</br>\nline two")).toEqual([]);
     roundTrips(excalidraw);
   });
 });

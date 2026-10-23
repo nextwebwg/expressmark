@@ -111,6 +111,8 @@ rendering is available from 0.1.2.
   autolinks; `modern` reads the Expressive Markdown specification, with
   Markdown inside HTML elements and no indented code. A frontmatter `syntax`
   key or the `syntax` option chooses; see [syntax](docs/syntax.md).
+- Lint warnings for spellings other than the preferred form, and a writer
+  option that writes the preferred form; see [lint](docs/lint.md).
 - YAML frontmatter, a designated document title/ID, and JSON-compatible custom metadata.
 - Nested colon containers, inline/leaf directives, open semantic types and shared string/flag attributes.
 - Alerts, `> [!note] Title`, as a supported second spelling of a callout, written back as authored.
