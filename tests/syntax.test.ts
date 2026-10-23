@@ -349,7 +349,13 @@ describe("spec examples", () => {
     ["- a\n- b\n\n- c\n\n- a\n\n  more\n- b\n\n1. one\n2. two\n\n3. three", '<ul><li>a</li><li>b</li></ul><ul><li>c</li></ul><ul><li><p>a</p><p>more</p></li><li>b</li></ul><ol><li>one</li><li>two</li></ol><ol start="3"><li>three</li></ol>'],
     ['[Notes](my notes.md)\n[Draft](notes (draft).md "Draft") and [Next](next.md)\n![Chart](my chart.png)', '<p><a href="my%20notes.md">Notes</a><a href="notes%20(draft).md" title="Draft">Draft</a> and <a href="next.md">Next</a><img src="my%20chart.png" alt="Chart" /></p>'],
     ["[x]\n\n[x]: /one\n[x]: /two", '<p><a href="/two">x</a></p>'],
+    ["<details>\nUse `</details>` to close it.\n</details>", "<details>Use <code>&lt;/details&gt;</code> to close it.</details>"],
+    ["<div>\nopen\n\nAfter", "<div>open</div><p>After</p>"],
+    ["Run <script>if (a **b** c) `x`</script> now.", "<p>Run <script>if (a **b** c) `x`</script> now.</p>"],
   ])("%s", (source, html) => expect(render(source)).toBe(html));
+  it("continues a footnote on lines indented past its marker", () => {
+    expect(parse("[^a]: First.\n\n  Second.\nAfter.", { syntax: "modern" }).body.map(node => node.type === "footnoteDefinition" ? node.body?.map(child => child.value) : node.value)).toEqual([["First.", "Second."], "After."]);
+  });
   it("reads <u> and <mark> as element nodes", () => {
     expect(parse("<u>Underlined</u> and <mark>highlighted</mark> text.", { syntax: "modern" }).body[0]).toEqual({ type: "paragraph", children: [
       { type: "htmlElement", display: "inline", tag: "u", open: "<u>", close: "</u>", value: "Underlined" },
