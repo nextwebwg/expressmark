@@ -173,8 +173,8 @@ importers:
         specifier: 15.0.3
         version: 15.0.3
       parseman:
-        specifier: 0.54.0
-        version: 0.54.0
+        specifier: 0.55.2
+        version: 0.55.2
       sanitize-html:
         specifier: 2.18.1
         version: 2.18.1
@@ -1047,8 +1047,8 @@ packages:
   parse-srcset@1.0.2:
     resolution: {integrity: sha512-/2qh0lav6CmI15FzA3i/2Bzk2zCgQhGMkvhOhKNcBVQ1ldgpbfiNTVslmooUmWJcADi1f1kIeynbDRVzNlfR6Q==}
 
-  parseman@0.54.0:
-    resolution: {integrity: sha512-axAkINMNllfz1IRxKhI6qm3GVcBvvTVxnjvIo+kKCmL9PWYeK1XYQO/121uYuEsTvsw1QXpT5wTUyZmu+xTfcQ==}
+  parseman@0.55.2:
+    resolution: {integrity: sha512-FmRj2BmiK08Ey6i4tK8XJPV7JARytnnxLnuozCeyPUVtSgWQ/qolx3zUNXpmjTY5Qz5WKMS/kzc8ui7tYzVDGQ==}
     engines: {node: ^20.19.0 || >=22.13.0}
     hasBin: true
 
@@ -1799,7 +1799,7 @@ snapshots:
 
   parse-srcset@1.0.2: {}
 
-  parseman@0.54.0:
+  parseman@0.55.2:
     dependencies:
       linecraft: 0.2.6
       magic-string: 0.30.21
