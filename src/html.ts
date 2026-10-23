@@ -144,6 +144,12 @@ export function normalizeTags(html: string, allowed: (name: string) => boolean =
   parts.push(html.slice(copied));
   return { html: parts.join(""), strays, shown };
 }
+/** A start tag filtered by the safe profile: the sanitizer's own output may close it. */
+export function sanitizeStartTag(open: string, options: ConversionOptions = {}): string {
+  const clean = sanitizeFragment(open, options);
+  const tag = /^<[A-Za-z]/.test(clean) ? readStartTag(clean, 0) : undefined;
+  return tag ? clean.slice(0, tag.end) : clean;
+}
 /** Whether the safe profile, with a host's allowlist, keeps an element. */
 export function allowedElement(name: string, allowlist?: HtmlAllowlist): boolean {
   return ((allowlist ? allowlistPolicy(allowlist) : policy).allowedTags as string[]).includes(name);
@@ -244,10 +250,13 @@ export function htmlNodes(source: string, display: "inline" | "block", options: 
       else {
         const presentation = new Set(["data-column-widths","data-text-align","data-background-color","data-placement","data-responsive"]);
         const name=presentation.has(key) ? key.slice(5) : key;
-        attributes[attributeKey(name)] = value;
+        // A class list or style spanning lines collapses its line breaks, which carry no meaning there.
+        attributes[attributeKey(name)] = key === "class" || key === "style" ? value.replace(/[ \t]*[\r\n]+[ \t]*/g, " ") : value;
       }
     }
     const finish = (node: Node): Node[] => {
+      // Another attribute spanning lines has no Markdown attribute form, so the element stays HTML.
+      if (Object.values(attributes).some(value => typeof value === "string" && /[\r\n]/.test(value))) return [{type:"html",display:context === "inline" ? "inline":"block",value:sanitize(clean.slice(raw.startIndex ?? 0,(raw.endIndex ?? clean.length - 1)+1),policy)}];
       if (id !== undefined) node.id = id;
       if(typeof attributes.dataAttributes === "string") {
         const payload=attributes.dataAttributes;

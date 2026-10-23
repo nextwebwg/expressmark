@@ -71,6 +71,6 @@ describe("lint rules", () => {
     expect(pipes("| a | b |\n| --- | --- |\n| x \\| y | z |")).toEqual([]);
   });
   it("writes authored spellings back without preferredForms", () => {
-    expect(stringify(parse("* _a_"))).toBe("* _a_\n");
+    expect(stringify(parse("* _a_"))).toBe("* _a_");
   });
 });

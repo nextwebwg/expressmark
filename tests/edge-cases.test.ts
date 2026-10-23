@@ -29,14 +29,14 @@ it("uses the enclosing block context for literal punctuation",()=> {
     expect(parse(stringify(line))).toEqual(line);
   }
   const source="- Clamp to [-1, 1]; use {name}, a@word and a | b.";
-  expect(stringify(parse(source))).toBe(`${source}\n`);
+  expect(stringify(parse(source))).toBe(source);
 });
 
 it("keeps unmatched backticks literal inside directive labels and titles",()=> {
   for(const source of [":chip[Use ` literally]", "::: note [Use ` literally]\nBody.\n:::"]) {
     const document=parse(source);
     expect(JSON.stringify(document)).toContain('"subType":');
-    expect(stringify(document)).toBe(`${source}\n`);
+    expect(stringify(document)).toBe(source);
     expect(parse(stringify(document))).toEqual(document);
   }
   const document: Document={type:"document",version:1,title:{type:"title",value:"Unmatched [ range"},body:[]};
@@ -138,7 +138,7 @@ it("keeps a literal colon before an inline directive from opening a leaf block",
 
 it("writes readable destinations and preserves destinations needing delimiters",()=> {
   const readable="[Guide](../guides/start.md#setup) and ![Diagram](./assets/diagram.png).";
-  expect(stringify(parse(readable))).toBe(`${readable}\n`);
+  expect(stringify(parse(readable))).toBe(readable);
   for(const source of ['[Guide](<../guides/start (advanced).md>)', '![Diagram](<./assets/diagram(final).png> "Example")']) {
     const document=parse(source);
     const output=stringify(document);
@@ -153,7 +153,7 @@ it("keeps ordinary headings, lists, code and semantic inline content readable",(
     "Thanks, @[Ada Lovelace]#user-123. :chip[Ready]",
   ]) {
     const document=parse(source);
-    expect(stringify(document)).toBe(`${source}\n`);
+    expect(stringify(document)).toBe(source);
     expect(parse(stringify(document))).toEqual(document);
   }
 });
@@ -164,7 +164,7 @@ it("writes intraword underscores and email link labels without unnecessary escap
     "[support@example.test](mailto:support@example.test)",
   ]) {
     const document=parse(source);
-    expect(stringify(document)).toBe(`${source}\n`);
+    expect(stringify(document)).toBe(source);
     expect(parse(stringify(document))).toEqual(document);
   }
 });

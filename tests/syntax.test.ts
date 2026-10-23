@@ -18,7 +18,7 @@ function codes(markdown: string, syntax: Syntax = "modern", options: ConversionO
 }
 // `stringify` writes each document back as authored.
 function roundTrips(markdown: string, syntax: Syntax = "modern"): void {
-  expect(stringify(parse(markdown, { syntax, trustedHtml: true }), { syntax, trustedHtml: true })).toBe(`${markdown}\n`);
+  expect(stringify(parse(markdown, { syntax, trustedHtml: true }), { syntax, trustedHtml: true })).toBe(markdown);
 }
 
 describe("syntax selection", () => {
@@ -35,8 +35,8 @@ describe("syntax selection", () => {
   it("records the syntax and writes the key when it differs from the host's default", () => {
     const document = parse("Text", { syntax: "modern" });
     expect(document.syntax).toBe("modern");
-    expect(stringify(document)).toBe("---\nmarkdownSyntax: modern\n---\n\nText\n");
-    expect(stringify(document, { syntax: "modern" })).toBe("Text\n");
+    expect(stringify(document)).toBe("---\nmarkdownSyntax: modern\n---\n\nText");
+    expect(stringify(document, { syntax: "modern" })).toBe("Text");
   });
   it("keeps an unknown syntax value as metadata, with a diagnostic", () => {
     expect(codes("---\nmarkdownSyntax: strict\n---\nText", "compatible")).toContain("invalid-syntax");
@@ -171,7 +171,7 @@ describe("self-closing elements", () => {
   });
   it("writes the authored /> back", () => {
     for (const source of ['<x-embed video="1" />', "<div><x-a /><p>b</p></div>"]) roundTrips(source);
-    expect(stringify(parse('<x-embed video="1" />', { trustedHtml: true }), { trustedHtml: true })).toBe('<x-embed video="1" />\n');
+    expect(stringify(parse('<x-embed video="1" />', { trustedHtml: true }), { trustedHtml: true })).toBe('<x-embed video="1" />');
   });
 });
 

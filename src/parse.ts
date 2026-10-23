@@ -2,8 +2,8 @@ import MarkdownIt, { type Token, type StateBlock, type StateInline } from "markd
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { configureAutolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { alertMarker, attach, compact, destination, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
-import { htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
+import { alertMarker, attach, compact, contentHash, contentHashes, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installModern, modernRules, type ModernRule } from "./modern.js";
 import type { ConversionOptions, Document, Json, Node, Position, Syntax } from "./types.js";
@@ -66,6 +66,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   const tasks=new WeakMap<Node,RegExpExecArray>();
   let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
   let recoveredFrontmatter: Node | undefined;
+  let frontmatterValid=false;
 
   let lineMode = 0;
   function inline(source: string, lineBlock = false): Node[] {
@@ -168,7 +169,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(!match || tokenHandle(match[1]!) !== match[1]) return false;
     if(silent) return true;
     footnotes.add(match[1]!);
-    const opened=state.push("footnote_open","",1); opened.meta={label:match[1]}; opened.map=[start,start+1];
+    const opened=state.push("footnote_open","",1); opened.meta={label:match[1]}; const lines: [number,number]=[start,start+1]; opened.map=lines;
     // Read the note like a list item: its first line starts after the marker,
     // and its continuation lines are indented four columns past the marker, or
     // in `modern` syntax, past the marker by any amount, as list nesting is.
@@ -189,6 +190,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.parentType="footnote" as typeof state.parentType;
     if(state.sCount[start]! < state.blkIndent) state.sCount[start]!+=state.blkIndent;
     state.md.block.tokenize(state,start,end);
+    lines[1]=state.line;
     state.parentType=saved.parentType;
     state.blkIndent=outer;
     state.tShift[start]=saved.tShift; state.sCount[start]=saved.sCount; state.bMarks[start]=saved.bMark;
@@ -313,6 +315,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     }
     if(close === end || !new RegExp(`^:{${length}}[ \\t]*$`).test(line(state,close))) {
       const token=state.push("expressive_literal","",0);
+      token.map=[start,end];
       token.content=sanitizeHtml(state.getLines(start,end,state.blkIndent,false).replace(/\n+$/,""),options);
       warn(options,"unclosed-container","An unclosed or mismatched container is preserved as literal source.");
       state.line=end; return true;
@@ -381,7 +384,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   function elementNodes(name: string, open: string, close: string | undefined, display: "inline" | "block", slot: {body?: Node[]; children?: Node[]; value?: string}): Node[] {
     let kept=open;
     if(!options.trustedHtml && !open.startsWith("</")) {
-      kept=sanitizeFragment(open,options);
+      kept=sanitizeStartTag(open,options);
       if(!kept.trim()) {
         warn(options,"html-element-escaped",`<${name}> is outside the safe HTML profile; it is shown as text.`);
         const text=(value: string): Node => ({type:"literal",display,value});
@@ -501,7 +504,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
                 if(node.body) node.body=node.body.flatMap(populate);
                 if(node.type === "html" && node.value?.includes(marker)) {
                   warn(options,"opaque-inline-html","Markdown inside an opaque native HTML element is retained as readable text.");
-                  node.value=node.value.replace(marker,inner.map(child=>child.value ?? "").join(""));
+                  node.value=node.value.replace(marker,escapeHtml(inner.map(plainText).join("")));
                 }
                 return [node];
               }
@@ -524,13 +527,18 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     // The block nodes a token made take its source lines, for lint positions.
     const place=(nodes: Node[], at: number, map: [number,number] | null | undefined)=> {
       if(!map || original !== source) return;
-      for(const node of nodes.slice(at)) if(!positions.has(node)) positions.set(node,{start:{line:map[0]+lineOffset+1,column:1},end:{line:map[1]+lineOffset,column:lineAt(map[1]-1).length+1}});
+      // Only lint reports the end column, which reading the source's lines gives.
+      for(const node of nodes.slice(at)) if(!positions.has(node)) positions.set(node,{start:{line:map[0]+lineOffset+1,column:1},end:{line:map[1]+lineOffset,column:options.lint ? lineAt(map[1]-1).length+1 : 1}});
     };
+    // Top-level blocks always take their lines, for writing them back exactly.
+    let depth=0;
     function read(until?:string): Node[] {
+      depth++;
       const nodes: Node[]=[];
       let made: {at: number; map: [number,number] | null} | undefined;
+      const finish=()=>{ if(made && (options.lint || depth === 1)) place(nodes,made.at,made.map); };
       while(cursor<tokens.length) {
-        if(made && options.lint) place(nodes,made.at,made.map);
+        finish();
         const token=tokens[cursor++]!;
         if(token.type === until) break;
         made={at:nodes.length,map:token.map};
@@ -761,7 +769,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           }
         }
       }
-      if(made && options.lint) place(nodes,made.at,made.map);
+      finish();
+      depth--;
       return nodes;
     }
     return read();
@@ -818,6 +827,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       // duplicate key. Writers regenerate YAML once the metadata changes.
       if(!duplicateKeys) spell(document,"frontmatter",value);
     } catch(error) { valid=false; warn(options,"invalid-frontmatter",error instanceof Error ? error.message : "Unsupported YAML frontmatter."); }
+    frontmatterValid=valid;
     if(!valid) recoveredFrontmatter={type:"literal",display:"block",value:sanitizeHtml(front[0].trimEnd(),options)};
     lineOffset=front[0].split("\n").length-1;
     source=source.slice(front[0].length);
@@ -836,7 +846,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const used=new Set(referenceOrder(document,notes));
     for(const label of notes.keys()) if(!used.has(label)) warn(options,"unused-footnote",`Footnote [^${label}] is never referenced.`);
   }
-  if(recoveredFrontmatter) document.body.unshift(recoveredFrontmatter);
+  if(recoveredFrontmatter) {
+    document.body.unshift(recoveredFrontmatter);
+    positions.set(recoveredFrontmatter,{start:{line:1,column:1},end:{line:lineOffset,column:1}});
+  }
   clearAutomatic(document);
   // A fence longer than the writer's own is a spelling; an equal one is not.
   // Returns the length the writer gives a container, or its deepest nested one.
@@ -863,7 +876,59 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   }
   diagnoseIds(document,options);
   if(options.lint) lint(document,positions,options);
+  recordSource(document,markdown,positions,lineOffset,frontmatterValid,options);
   return document;
+}
+
+/**
+ * Record what writing an unedited document back byte for byte needs: its
+ * source text, and each top-level block's range in it with a hash of the
+ * block's data. Blocks whose source shares lines form one range. A writer
+ * replays a range while its blocks still hash the same.
+ */
+function recordSource(document: Document, text: string, positions: WeakMap<Node,Position>, headLines: number, head: boolean, options: ConversionOptions): void {
+  const starts=[0], ends: number[]=[];
+  for(let index=0;index<text.length;index++) {
+    const code=text.charCodeAt(index);
+    if(code === 10 || code === 13) { ends.push(index); if(code === 13 && text.charCodeAt(index+1) === 10) index++; starts.push(index+1); }
+  }
+  ends.push(text.length);
+  const hashes=contentHashes(document.body);
+  // Where tags appear, which marks blocks holding HTML the safe profile may filter.
+  const tags: number[]=[];
+  for(const match of text.matchAll(/<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])|<!--|<\?|<![A-Za-z]/g)) tags.push(match.index);
+  let tag=0;
+  const range=(node: Node): [number,number] | undefined => {
+    const position=positions.get(node);
+    if(position) return [position.start.line-1,position.end.line];
+    const inner=(node.body ?? []).map(range);
+    return inner.length && inner.every(Boolean) ? [inner[0]![0],inner.at(-1)![1]] : undefined;
+  };
+  // Each entry: block count, hash, source range, and 1 when its source holds HTML.
+  const blocks: [number,string,number,number,number][]=[];
+  let group: {at: number; count: number; from: number; to: number} | undefined;
+  const close=()=>{
+    if(!group) return;
+    // Trailing blank lines are spacing, which belongs between blocks.
+    while(group.to-1>group.from && !text.slice(starts[group.to-1],ends[group.to-1]).trim()) group.to--;
+    const from=starts[group.from]!, to=ends[group.to-1]!;
+    // A tag anywhere in the block, code included, marks HTML the safe profile may filter.
+    while(tag<tags.length && tags[tag]!<from) tag++;
+    const html=tag<tags.length && tags[tag]!<to ? 1:0;
+    blocks.push([group.count,hashes.slice(group.at,group.at+group.count).join("+"),from,to,html]);
+  };
+  for(const [index,node] of document.body.entries()) {
+    const lines=range(node);
+    if(!lines || lines[1]<=lines[0] || lines[1]>ends.length) return;
+    if(group && lines[0]<group.to) { group.count++; group.to=Math.max(group.to,lines[1]); continue; }
+    close();
+    group={at:index,count:1,from:lines[0],to:lines[1]};
+  }
+  close();
+  for(let index=1;index<blocks.length;index++) if(blocks[index]![2]<blocks[index-1]![3]) return;
+  document.source={...document.source,text,blocks,
+    ...(head ? {head:[contentHash([document.id,document.title,document.metadata,document.syntax]),starts[headLines] ?? text.length]} : {}),
+    ...(options.trustedHtml ? {trusted:true} : {})};
 }
 
 function splitRow(line: string): string[] {
