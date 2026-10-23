@@ -38,7 +38,11 @@ export interface Node {
   colSpan?: number;
   rowSpan?: number;
   display?: "inline" | "block";
-  tag?: "span" | "div";
+  /** A group's element, or an HTML element's tag name. */
+  tag?: string;
+  /** An HTML element's start tag and closing tag, as written. An unclosed element has no `close`. */
+  open?: string;
+  close?: string;
 }
 export interface Document extends Node {
   type: "document";
@@ -46,7 +50,11 @@ export interface Document extends Node {
   body: Node[];
   title?: Node;
   metadata?: { [key: string]: Json };
+  /** The syntax that read the document, when it is `modern` or set by its frontmatter. */
+  syntax?: Syntax;
 }
+/** `compatible` reads CommonMark 0.31.2 and GFM with the extensions; `modern` reads the Expressive Markdown spec. */
+export type Syntax = "compatible" | "modern";
 export interface Diagnostic {
   code: string;
   message: string;
@@ -60,6 +68,8 @@ export interface ConversionOptions {
    * `renderHtml` still applies its profile and the host's allowlist.
    */
   trustedHtml?: boolean;
+  /** The syntax for documents whose frontmatter sets none. Default `compatible`. */
+  syntax?: Syntax;
 }
 export class ConversionError extends Error {
   readonly code: string;

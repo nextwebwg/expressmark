@@ -30,7 +30,10 @@ describe("trusted host HTML", () => {
   });
   it("keeps the strict profile by default", () => {
     expect(JSON.stringify(parse(authored).body)).not.toMatch(/template|demo-card|<style|<link/);
-    expect(renderHtml(parse(authored,{trustedHtml:true}))).not.toMatch(/template|demo-card|<style|<link/);
+    // Disallowed elements are shown as text, as GitHub's tag filter shows them.
+    const html = renderHtml(parse(authored,{trustedHtml:true}));
+    expect(html).not.toMatch(/<template|<demo-card|<style|<link/);
+    expect(html).toContain("&lt;demo-card tone=\"calm\"&gt;<strong>bold</strong>&lt;/demo-card&gt;");
   });
   it("renders allowlisted elements, attributes and style values", () => {
     const allow: HtmlAllowlist = {tags:["demo-card","template","button","input"],attributes:{"demo-card":["tone"],template:["component"],input:["type","checked","disabled"]},styles:{color:[/^light-dark\(#[\da-f]+, #[\da-f]+\)$/i],"--shiki-dark":[/^#[\da-f]{3,8}$/i]}};
@@ -51,7 +54,7 @@ describe("trusted host HTML cannot be bypassed through attributes", () => {
     ['<a href="jav&#97;script:steal()">x</a>','<p><a>x</a></p>'],
     ['<demo-link href="javascript:steal()">x</demo-link>','<p><demo-link>x</demo-link></p>'],
     ['<span style="background:url(https://example.com/track)">x</span>','<p><span>x</span></p>'],
-    ['<script>steal()</script>',""],
+    ['<script>steal()</script>',"&lt;script&gt;steal()&lt;/script&gt;"],
   ])("blocks %s", (html, expected) => {
     expect(renderHtml(parse(html,{trustedHtml:true}),{trustedHtml:allow})).toBe(expected);
   });

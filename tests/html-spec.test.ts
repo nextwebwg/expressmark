@@ -11,8 +11,11 @@ import { sanitizeHtml, type HtmlAllowlist } from "../src/html.js";
 interface Example { example: number; section: string; markdown: string; html: string }
 const { sources } = JSON.parse(readFileSync(new URL("./fixtures/html-spec-examples.json", import.meta.url), "utf8")) as { sources: Record<string, { examples: Example[] }> };
 // GFM 0.29 predates CommonMark 0.31's comment rules, the base of Expressive
-// Markdown; its tag filter escapes tags on output, a renderer decision.
-const superseded: Record<string, Record<number, string>> = { gfm: { 649: "CommonMark 0.31 comments", 650: "CommonMark 0.31 comments", 657: "GFM tag filter on output" } };
+// Markdown; its tag filter escapes tags on output, a renderer decision. In
+// Expressive Markdown `/>` closes every element, so `<a/><b2/>` is two
+// elements, and a stray end tag such as example 148's `</p>` is ignored.
+const selfClosing = "`/>` closes every element", stray = "a stray end tag is ignored";
+const superseded: Record<string, Record<number, string>> = { commonmark: { 148: stray, 614: selfClosing, 615: selfClosing }, gfm: { 118: stray, 637: selfClosing, 638: selfClosing, 649: "CommonMark 0.31 comments", 650: "CommonMark 0.31 comments", 657: "GFM tag filter on output" } };
 const allowlist = (text: string): HtmlAllowlist => {
   const tags = new Set<string>(), attributes = new Set<string>();
   for (const match of text.matchAll(/<\/?([A-Za-z][A-Za-z0-9-]*)([^>]*)>/g)) {

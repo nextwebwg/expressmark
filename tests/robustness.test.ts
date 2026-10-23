@@ -43,6 +43,11 @@ describe("safe HTML maps within its context", () => {
   it("keeps an HTML table with irregular spans as HTML", () => {
     expect(roundTrips('<table><tr><td rowspan="3">A</td></tr><tr><td>B</td><td>C</td></tr></table>').body[0]).toMatchObject({type:"html",display:"block"});
   });
+  it("keeps a link definition whose title spans lines", () => {
+    const source="[foo]: /url '\ntitle\nline1\n'\n\n[foo]";
+    expect(semantic(parse(source).body[0])).toEqual({type:"definition",label:"foo",url:"/url",title:"\ntitle\nline1\n"});
+    expect(stringify(parse(source))).toBe(`${source}\n`);
+  });
   it("writes an image with a multiline tooltip as native HTML", () => {
     expect(stringify(parse('<img src="a.png" alt="A" title="Line one\nLine two">'))).toContain("<img");
   });
