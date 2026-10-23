@@ -233,6 +233,18 @@ function semanticJson(value: unknown): string {
   return JSON.stringify(value, (key, item: unknown) => key === "source" || key === "position" ? undefined
     : item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : 1)) : item);
 }
+/**
+ * A short hash of a node's JSON, for recognizing unedited blocks when writing:
+ * FNV-1a with the length, a change detector rather than a cryptographic hash.
+ */
+export function contentHash(value: unknown): string {
+  const text = JSON.stringify(value) ?? "";
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  return `${(hash >>> 0).toString(36)}.${text.length.toString(36)}`;
+}
+export const contentHashes = (nodes: readonly unknown[]): string[] => nodes.map(contentHash);
+
 /** Whether two nodes hold the same document data, apart from source spelling. */
 export function sameData(a: unknown, b: unknown): boolean { return semanticJson(a) === semanticJson(b); }
 

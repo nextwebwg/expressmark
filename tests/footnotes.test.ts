@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ConversionError, parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
+import { fresh } from "./semantic.js";
 
 const reference = (label: string): Node => ({type:"footnoteReference",label});
 const note = (label: string, ...body: Node[]): Node => ({type:"footnoteDefinition",label,body});
@@ -41,7 +42,7 @@ describe("footnote conformance", () => {
   });
   it("normalizes a definition's spelling without moving it", () => {
     const source = "Intro[^a].\n\n[^a]:   Lazy\ncontinuation.\n\n## Next\n";
-    expect(stringify(parse(source))).toBe("Intro[^a].\n\n[^a]: Lazy\n    continuation.\n\n## Next\n");
+    expect(stringify(fresh(parse(source)))).toBe("Intro[^a].\n\n[^a]: Lazy\n    continuation.\n\n## Next\n");
   });
   it("reads an interrupting definition and keeps it after that paragraph", () => {
     expect(parse("Para\n[^a]: Note.\n\nRef[^a]").body).toEqual([paragraph(text("Para")),note("a",paragraph(text("Note."))),paragraph(text("Ref"),reference("a"))]);

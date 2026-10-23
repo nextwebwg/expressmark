@@ -138,8 +138,14 @@ conformance. The normative [syntax](https://nextwebwg.org/expressive-markdown/la
 ## Converter contract
 
 `parse(markdown, options?)` synchronously returns a version-1 `Document`.
-`stringify(document, options?)` synchronously returns canonical Markdown with a
-terminal newline, or `""` for an empty document. Neither executes code, loads
+`stringify(document, options?)` synchronously returns Markdown. An unedited
+parse writes back byte for byte, in both syntaxes, spacing and line endings
+included: the document records its source text and each top-level block's
+range in `source`, and an edited or new block is written in canonical form with
+the source's spacing kept around its unedited neighbours. A document built
+without a source is written in canonical form with a terminal newline, or `""`
+when empty. In the safe profile, a block holding HTML is written through the
+profile. Neither executes code, loads
 assets, resolves mentions, generates a TOC, or renders HTML. `renderHtml` is a
 separate operation.
 

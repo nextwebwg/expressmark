@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.17
+
+- Write an unedited document back byte for byte, in both syntaxes and HTML
+  profiles where the safe profile filters nothing: `parse` records the source
+  text and each top-level block's range and content hash in the document's
+  `source`, and `stringify` writes each unedited block from it, with the
+  source's spacing between unedited neighbours and its line endings. Edited and
+  new blocks are written in canonical form. All 398 corpus READMEs and every
+  CommonMark and GFM example round-trip exactly with trusted HTML.
+- Keep the readable text of Markdown inside an opaque inline HTML element,
+  links and line breaks included, in the safe profile.
+- Keep an HTML element's start tag when the sanitizer closes a void element
+  such as `source`, and collapse line breaks in a class or style attribute; any
+  other attribute spanning lines keeps its element as HTML.
+
 ## 0.1.16
 
 - Add lint warnings for spellings other than the preferred form: `parse` with
@@ -26,9 +41,8 @@
   pipes in its table cell; read no lazy continuation; continue a list when its
   bullet or delimiter changes; read spaces in a link target that ends at its
   balancing parenthesis; nest list items and footnote continuations by relative
-  indentation; split a list
-  at a blank line between items; and use the last of duplicate link
-  definitions.
+  indentation; split a list at a blank line between items; and use the last
+  of duplicate link definitions.
 - In `modern`, end an unclosed element at its first blank line, never count
   tags inside code spans or fences when finding an element's end, and keep a
   raw-text element's content raw inside a paragraph too.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify, type Diagnostic, type Node } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
-import { semantic } from "./semantic.js";
+import { fresh, semantic } from "./semantic.js";
 
 const first = (source: string): Node => semantic(parse(source).body[0]!);
 // A paragraph of plain text holds it as a value; read it as one text node.
@@ -52,7 +52,8 @@ describe("colon fences", () => {
     const document = parse(source,{onDiagnostic:d => seen.push(d.code)});
     expect(semantic(document.body).map(node => node.type)).toEqual(["container","strayFence","paragraph","container"]);
     expect(seen).toEqual(["stray-fence"]);
-    expect(stringify(document)).toBe("::: note\nA\n:::\n\n:::\n\nAfter.\n\n::: tip\nC\n:::\n");
+    expect(stringify(document)).toBe(source);
+    expect(stringify(fresh(document))).toBe("::: note\nA\n:::\n\n:::\n\nAfter.\n\n::: tip\nC\n:::\n");
     expect(parse(stringify(document))).toEqual(document);
     expect(renderHtml(document)).toBe('<section data-type="note"><p>A</p></section><p>After.</p><section data-type="tip"><p>C</p></section>');
   });
@@ -84,7 +85,7 @@ describe("class shorthand", () => {
     expect(write({class:"wide"},"a")).toBe("## A {.wide #a}\n");
     expect(write({class:"one two",lang:"en"})).toBe('## A {.one .two lang="en"}\n');
     expect(write({class:"a&b"})).toBe('## A {class="a&b"}\n');
-    for (const source of ['## A {.wide #a}','## A {#a class="wide"}','## A {id="a" class="one two"}']) expect(stringify(parse(source))).toBe(`${source}\n`);
+    for (const source of ['## A {.wide #a}','## A {#a class="wide"}','## A {id="a" class="one two"}']) expect(stringify(parse(source))).toBe(source);
   });
 });
 
@@ -158,7 +159,7 @@ describe("review fixes", () => {
   });
   it("keeps the type an unreadable header names, with its remainder (minor 2)", () => {
     expect(parse("::: warning [unclosed\nx\n:::").body[0]).toEqual({type:"container",subType:"warning",source:{rest:" [unclosed"},body:[{type:"paragraph",value:"x"}]});
-    expect(stringify(parse("::: warning [unclosed\nx\n:::"))).toBe("::: warning [unclosed\nx\n:::\n");
+    expect(stringify(parse("::: warning [unclosed\nx\n:::"))).toBe("::: warning [unclosed\nx\n:::");
   });
   it("forms a span after an escaped image or mention marker (minor 3)", () => {
     expect(inlines("\\![w]{.x}")).toEqual([{type:"text",value:"!"},{type:"inline",value:"w",attributes:{class:"x"}}]);

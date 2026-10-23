@@ -32,13 +32,13 @@ describe("link reference writing", () => {
   it("changes a target or title in its definition, in place", () => {
     const parsed = parse("[Guide]\n\n[Guide]: /old\n\nAfter.");
     parsed.body[1] = {...parsed.body[1]!, url:"/new", title:"Updated"};
-    expect(stringify(parsed)).toBe('[Guide]\n\n[Guide]: /new "Updated"\n\nAfter.\n');
+    expect(stringify(parsed)).toBe('[Guide]\n\n[Guide]: /new "Updated"\n\nAfter.');
   });
   it("writes the full form when edited text no longer names the label", () => {
     const parsed = parse("[Guide] and [Guide][]\n\n[Guide]: /g");
     const [shortcut, , collapsed] = parsed.body[0]!.children!;
     shortcut!.value = "The guide"; collapsed!.value = "This guide";
-    expect(stringify(parsed)).toBe("[The guide][Guide] and [This guide][Guide]\n\n[Guide]: /g\n");
+    expect(stringify(parsed)).toBe("[The guide][Guide] and [This guide][Guide]\n\n[Guide]: /g");
   });
   it("closes a shortcut that the following text would extend", () => {
     const value = document({type:"paragraph",children:[ref("a","shortcut"),{type:"text",value:"(not a destination)"}]},definition("a","/a"));

@@ -1,7 +1,7 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
-import { alertMarker, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
-import { escapeHtml, rawTextElements, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
+import { alertMarker, contentHash, contentHashes, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
+import { escapeHtml, rawTextElements, readStartTag, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
 import { preferForms } from "./lint.js";
@@ -99,7 +99,8 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.type === "htmlElement") {
     const tag=typeof node.tag === "string" && /^[A-Za-z][A-Za-z0-9-]*$/.test(node.tag) ? node.tag : fail(`${path} needs an element tag name.`);
     // `</br>` is read as a `<br>` element.
-    if(typeof node.open !== "string" || !new RegExp(`^<${tag}(?=[\\s/>])[^<]*>$`,"i").test(node.open) && !(tag.toLowerCase() === "br" && /^<\/br[^<]*>$/i.test(node.open))) fail(`${path}.open needs the element's start tag.`);
+    const start=typeof node.open === "string" ? readStartTag(node.open,0) : undefined;
+    if(typeof node.open !== "string" || !(start && start.end === node.open.length && start.name === tag.toLowerCase()) && !(tag.toLowerCase() === "br" && /^<\/br[^<]*>$/i.test(node.open))) fail(`${path}.open needs the element's start tag.`);
     if(node.close !== undefined && (typeof node.close !== "string" || !new RegExp(`^</${tag}[ \\t]*>$`,"i").test(node.close))) fail(`${path}.close needs the element's closing tag.`);
     if(!["inline","block"].includes(node.display ?? "")) fail(`${path} needs inline or block display.`);
     if(node.body && node.display !== "block") fail(`${path} holds blocks only with block display.`);
@@ -446,7 +447,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const heading=["table",node.title !== undefined ? `[${caption(node)}]`:undefined,writeAttributes(node,settings)].filter(Boolean).join(" ");
     return `${colons} ${heading}\n\n${body}${body ? "\n\n":""}${colons}`;
   }
-  const elementTag=(open: string) => options.trustedHtml || open.startsWith("</") ? open : sanitizeFragment(open,options);
+  const elementTag=(open: string) => options.trustedHtml || open.startsWith("</") ? open : sanitizeStartTag(open,options);
   function block(node: Node, forceTabsWrapper = false): string {
     if(node.type === "paragraph") {
       const value=content(node);
@@ -595,6 +596,55 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   const authoredYaml=spelling(document,"frontmatter");
   const keepYaml=authoredYaml !== undefined && reads(`---\n${authoredYaml}\n---\n`,{type:"document",body:[],...(document.id !== undefined ? {id:document.id}:{}),...(document.title !== undefined ? {title:document.title}:{}),...(document.metadata ? {metadata:document.metadata}:{}),...(document.syntax ? {syntax:document.syntax}:{})} as Node,parsed=>({...parsed,version:undefined,body:[]} as unknown as Node),"frontmatter",document);
   const head=keepYaml ? `---\n${authoredYaml}\n---\n\n` : Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";
+  const exact=options.preferredForms ? undefined : exactly(head,metadata);
+  if(exact !== undefined) return exact;
   const body=blockArray(document.body);
   return `${head}${body}${head || body ? "\n":""}`;
+
+  // An unedited document is written back byte for byte: each block whose data
+  // still hashes as it did when parsed is written from the source, with the
+  // source's own spacing between unedited neighbours.
+  function exactly(generatedHead: string, metadata: Record<string,unknown>): string | undefined {
+    const recorded=document.source;
+    if(typeof recorded?.text !== "string" || !Array.isArray(recorded.blocks)) return;
+    const text=recorded.text, blocks=recorded.blocks as [number,string,number,number,number][];
+    const trusted=recorded.trusted === true && options.trustedHtml === true;
+    // The safe profile writes recorded source only where it holds no HTML: a
+    // block without HTML, and spacing that is only whitespace.
+    const replay=(slice: string, html = 1)=>trusted || !html || !slice.trim();
+    const newline=/\r\n/.test(text) ? "\r\n":"\n";
+    const lines=(value: string)=>newline === "\n" ? value : value.replace(/\n/g,newline);
+    let output="", end: number | undefined, used=-1, separator=true;
+    const recordedHead=recorded.head as [string,number] | undefined;
+    if(recordedHead && recordedHead[0] === contentHash([document.id,document.title,document.metadata,document.syntax]) && (metadata.markdownSyntax === undefined || text.slice(0,recordedHead[1]).includes("markdownSyntax"))) { output=text.slice(0,recordedHead[1]); end=recordedHead[1]; }
+    else if(!recordedHead && !generatedHead) end=0;
+    else { output=lines(generatedHead); separator=false; }
+    const nodes=document.body;
+    const each=contentHashes(nodes);
+    for(let index=0;index<nodes.length;) {
+      let found=-1;
+      for(let entry=used+1;entry<Math.min(blocks.length,used+64);entry++) {
+        const count=blocks[entry]![0];
+        if(index+count<=nodes.length && each.slice(index,index+count).join("+") === blocks[entry]![1]) { found=entry; break; }
+      }
+      if(found >= 0) {
+        const [count,,from,to,html]=blocks[found]!;
+        const gap=end !== undefined && found === used+1 && replay(text.slice(end,from)) ? text.slice(end,from) : undefined;
+        // An unedited block the profile filters is written fresh, keeping the source's spacing.
+        const value=replay(text.slice(from,to),html) ? text.slice(from,to) : lines(blockArray(nodes.slice(index,index+count)));
+        output+=gap ?? (output && separator && value ? lines("\n\n"):"");
+        separator=true;
+        output+=value;
+        end=to; used=found; index+=count;
+        continue;
+      }
+      const node=nodes[index]!;
+      const neighboringTabs=node.type === "container" && node.subType === "tabs" && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
+      const value=block(node,neighboringTabs);
+      if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; }
+      index++;
+    }
+    if(end !== undefined && used === blocks.length-1 && replay(text.slice(end))) return output+text.slice(end);
+    return output ? output+newline : "";
+  }
 }
