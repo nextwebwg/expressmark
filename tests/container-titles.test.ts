@@ -25,8 +25,12 @@ describe("container title spellings", () => {
   it("trims surrounding whitespace and reads attributes before the title", () => {
     expect(parse("::: note {#n}   Spaced title   {tone=calm}\nBody.\n:::").body).toEqual([container("note",plain("Spaced title"),{id:"n",titleSpelling:"unbracketed",attributes:{tone:"calm"},source:{header:" note {#n}   Spaced title   {tone=calm}"}})]);
   });
-  it("keeps a bracketed title followed by words as ordinary text", () => {
-    expect(parse("::: note [Title] extra\nBody.\n:::").body[0]?.type).toBe("paragraph");
+  it("reads a bracketed title followed by words as a generic container keeping its header", () => {
+    const seen: string[] = [];
+    const document = parse("::: note [Title] extra\nBody.\n:::\n",{onDiagnostic:d => seen.push(d.code)});
+    expect(document.body).toEqual([{type:"container",subType:"note",source:{rest:" [Title] extra"},body:[{type:"paragraph",value:"Body."}]}]);
+    expect(seen).toEqual(["invalid-container-header"]);
+    expect(stringify(document)).toBe("::: note [Title] extra\nBody.\n:::\n");
   });
   it("protects an unbracketed title that starts with a bracket or ends with an attribute-shaped list", () => {
     const document = {type:"document" as const,version:1 as const,body:[container("note",plain("[Draft] notes {x}"),{titleSpelling:"unbracketed"})]};

@@ -121,7 +121,8 @@ it("imports rich native tables as editable spans and block cells", () => {
 it("preserves malformed regions as literal recovery and reports invalid YAML", () => {
   const diagnostics: unknown[]=[];
   const document=parse('---\ntitle: [not a title]\n---\n\n::: warning\nUnclosed.',{onDiagnostic:d=>diagnostics.push(d)});
-  expect(document.body.map(node=>node.type)).toEqual(["literal","literal"]);
+  // An unclosed container runs to the end of its enclosing block.
+  expect(document.body.map(node=>node.type)).toEqual(["literal","container"]);
   expect(diagnostics.length).toBe(2);
 });
 

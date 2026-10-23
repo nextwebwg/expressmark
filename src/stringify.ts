@@ -32,7 +32,7 @@ function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {})
 const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"]);
 const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","version","metadata"];
 const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
-const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition"]);
+const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition","strayFence"]);
 const structural: Record<string,string[]> = {
     document:["version","metadata"], footnoteReference:["label"], footnoteDefinition:["label"],
     container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked"],
@@ -71,7 +71,8 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   }
   if(["list","table","tableRow"].includes(node.type) && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
   if(["paragraph","heading","title","emphasis","strong","delete","underline","highlight","lineBlock","link","linkReference","tableCell"].includes(node.type) && node.value == null && node.children == null && !(node.type === "tableCell" && node.body)) fail(`${path} needs content.`);
-  if(["text","inlineCode","code","html","literal"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
+  if(node.type === "strayFence" && !/^:{3,}$/.test(node.value ?? "")) fail(`${path} needs a bare colon fence value.`);
+  if(["text","inlineCode","code","html","literal","strayFence"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
   if(["definition","linkReference","imageReference"].includes(node.type)) {
     // A label is CommonMark link-label text: unescaped brackets close it early.
     if(typeof node.label !== "string" || !/^(?:\\[\s\S]|[^\\[\]])+$/.test(node.label) || !node.label.trim() || /\n[ \t]*\n/.test(node.label) || node.label.length>999) fail(`${path}.label needs a link label.`);
@@ -189,10 +190,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "softBreak") return "\n";
     if(node.type === "image") return `<img${attrsHtml(node,{src:node.url ?? "",alt:node.alt ?? "",...(typeof node.title === "string" ? {title:node.title}:{})})}>`;
     if(node.type === "link") return wrapper("a",kids(),{href:node.url ?? "",...(typeof node.title === "string" ? {title:node.title}:{})});
-    if(node.type === "inline") return wrapper("span",kids(),{"data-type":node.subType ?? "",...(node.ref !== undefined ? {"data-ref":node.ref}:{})});
+    if(node.type === "inline") return wrapper("span",kids(),{...(node.subType !== undefined ? {"data-type":node.subType}:{}),...(node.ref !== undefined ? {"data-ref":node.ref}:{})});
     if(node.type === "container" && !["details","figure"].includes(node.subType ?? "")) {
       const heading=node.title ? `<header>${typeof node.title === "object" ? native(node.title):escapeHtml(node.title)}</header>`:"";
-      return wrapper("section",`${heading}${(node.body ?? []).map(native).join("")}`,{"data-type":node.subType ?? ""});
+      return node.subType === undefined ? wrapper("div",`${heading}${(node.body ?? []).map(native).join("")}`) : wrapper("section",`${heading}${(node.body ?? []).map(native).join("")}`,{"data-type":node.subType});
     }
     if(node.type === "group") return wrapper(node.tag ?? (node.display === "inline" ? "span":"div"),(node.children ?? []).map(native).join(""));
     if(node.type === "blockquote") return wrapper("blockquote",(node.body ?? []).map(native).join(""));
@@ -295,6 +296,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return `${node.type === "imageReference" ? "!":""}[${text}]${form === "full" ? `[${label}]` : form === "collapsed" ? "[]":""}${attrs}`;
     }
     if(node.type === "inline") {
+      // A typeless inline is a bracketed span: its attribute list is its only marker.
+      if(node.subType === undefined) return `[${content(node,{label:true})}]${attrs || "{}"}`;
       if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Inline directives need a valid subtype.");
       if(node.subType === "mention") {
         // Markdown cannot spell a mention at a non-whitespace source boundary.
@@ -472,7 +475,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     }
     if(node.type === "list") return list(node);
     if(node.type === "container" || node.type === "leaf") {
-      if(!/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
+      // Only a container may omit its type; a leaf directive names one.
+      if(!(node.type === "container" && node.subType === undefined) && !/^[a-z][a-z0-9_-]*$/.test(node.subType ?? "")) fail("Containers and leaf directives need a valid subtype.");
       if(!forceTabsWrapper && spelling(node,"form") !== "explicit" && node.type === "container" && node.subType === "tabs" && !node.id && !node.title && !node.attributes && node.body?.every(child=>child.type === "container" && child.subType === "tab")) return blockArray(node.body);
       if(node.type === "container" && node.spelling === "alert") {
         if(node.id !== undefined || node.attributes || structuralTypes.has(node.subType!)) warn(options,"unsupported-alert","An alert has no attribute or structural-type spelling; it is written as a colon container.");
@@ -495,8 +499,11 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         const found=node.subType === "tab" && first?.subType === "tabs" ? first.body?.[0] : first;
         return found ? {...found,...(node.type === "leaf" ? {}:{body:[]})} : undefined;
       },"header",node);
+      // An unreadable header writes its type and its kept remainder.
+      const rest=spelling(node,"rest");
+      if(rest !== undefined && node.type === "container" && node.title === undefined && !node.attributes && node.id === undefined) return `${colons}${node.subType ? ` ${node.subType}`:""}${rest}\n${blockArray(node.body ?? [])}\n${colons}`;
       const header=keep ? authored! : [node.subType,node.title !== undefined ? title(node):undefined,writeAttributes(node)].filter(Boolean).join(" ");
-      return node.type === "leaf" ? `${colons}${header}` : `${colons}${keep ? "":" "}${header}\n${blockArray(node.body ?? [])}\n${colons}`;
+      return node.type === "leaf" ? `${colons}${header}` : `${colons}${keep || !header ? "":" "}${header}\n${blockArray(node.body ?? [])}\n${colons}`;
     }
     if(node.type === "lineBlock") {
       if(node.id !== undefined || node.attributes) fail("Line-block attributes have no lossless core source mapping.");
@@ -519,6 +526,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return `[^${node.label}]:${lines.map((line,index)=>!line ? "" : index === 0 ? ` ${line}`:`    ${line}`).join("\n")}`;
     }
     if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeFragment(node.value ?? "",options); }
+    if(node.type === "strayFence") return node.value!;
     if(node.type === "group") return safeNative(node);
     if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeLiteral(node.value ?? "",options); }
     fail(`Unsupported block node: ${node.type}.`);
