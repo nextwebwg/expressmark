@@ -8,7 +8,7 @@ const exact = (source: string, syntax: Syntax = "compatible", trustedHtml = true
   expect(stringify(parse(source, { syntax, trustedHtml }), { syntax, trustedHtml })).toBe(source);
 
 describe("exact round trips", () => {
-  it.each(["compatible", "modern"] as const)("writes an unedited %s document back byte for byte", syntax => {
+  it.each(["compatible", "standard"] as const)("writes an unedited %s document back byte for byte", syntax => {
     for (const source of [
       "# Title\n\n\n\nText  with  spaces.   \n\n* a\n*   b\n\n\n",
       "---\ntitle:   Spaced\n---\n\n\nBody",
@@ -21,7 +21,7 @@ describe("exact round trips", () => {
   });
   it("writes the CommonMark and GFM HTML examples back byte for byte", () => {
     const { sources } = JSON.parse(readFileSync(new URL("./fixtures/html-spec-examples.json", import.meta.url), "utf8")) as { sources: Record<string, { examples: { markdown: string }[] }> };
-    for (const { examples } of Object.values(sources)) for (const { markdown } of examples) for (const syntax of ["compatible", "modern"] as const) exact(markdown, syntax);
+    for (const { examples } of Object.values(sources)) for (const { markdown } of examples) for (const syntax of ["compatible", "standard"] as const) exact(markdown, syntax);
   });
   it("keeps the unedited blocks and their spacing when one block changes", () => {
     const document = parse("# Title\n\n\n*  one\n*  two\n\n\nLast  line.");

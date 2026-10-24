@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { ConversionError, parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { ConversionError, type Diagnostic, type Document, type Node } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
 import { fresh } from "./semantic.js";
 
@@ -34,7 +35,7 @@ const cases: Case[] = [
 describe("footnote conformance", () => {
   it.each(cases)("$name", ({source,body,diagnostics = []}) => {
     const seen: Diagnostic[] = [];
-    const expected: Document = {type:"document",version:1,body};
+    const expected: Document = {type:"document",version:1,syntax:"compatible",body};
     const document = parse(source,{onDiagnostic:diagnostic => seen.push(diagnostic)});
     expect(document).toEqual(expected);
     expect(seen.map(diagnostic => diagnostic.code)).toEqual(diagnostics);
@@ -51,19 +52,19 @@ describe("footnote conformance", () => {
 
 describe("footnote writing", () => {
   it("escapes literal text that would refer to a defined note, and only that", () => {
-    const document: Document = {type:"document",version:1,body:[paragraph(text("Literal [^a] and [^b]."),reference("a")),note("a",paragraph(text("A.")))]};
+    const document: Document = {type:"document",version:1,syntax:"compatible",body:[paragraph(text("Literal [^a] and [^b]."),reference("a")),note("a",paragraph(text("A.")))]};
     expect(stringify(document)).toBe("Literal \\[^a] and [^b].[^a]\n\n[^a]: A.\n");
     expect(parse(stringify(document))).toEqual(document);
   });
   it("writes an undefined reference and reports that it reads back as text", () => {
     const seen: string[] = [];
-    expect(stringify({type:"document",version:1,body:[paragraph(reference("gone"))]},{onDiagnostic:d => seen.push(d.code)})).toBe("[^gone]\n");
+    expect(stringify({type:"document",version:1,syntax:"compatible",body:[paragraph(reference("gone"))]},{onDiagnostic:d => seen.push(d.code)})).toBe("[^gone]\n");
     expect(seen).toEqual(["undefined-footnote"]);
   });
   it.each<[string, Document]>([
-    ["a definition in inline content",{type:"document",version:1,body:[paragraph(note("a"))]}],
-    ["an invalid label",{type:"document",version:1,body:[paragraph(reference("two words"))]}],
-    ["a reference ID",{type:"document",version:1,body:[paragraph({...reference("a"),id:"x"}),note("a")]}],
+    ["a definition in inline content",{type:"document",version:1,syntax:"compatible",body:[paragraph(note("a"))]}],
+    ["an invalid label",{type:"document",version:1,syntax:"compatible",body:[paragraph(reference("two words"))]}],
+    ["a reference ID",{type:"document",version:1,syntax:"compatible",body:[paragraph({...reference("a"),id:"x"}),note("a")]}],
   ])("rejects %s", (_name, document) => {
     expect(() => stringify(document)).toThrow(ConversionError);
   });
@@ -87,6 +88,6 @@ describe("footnote HTML", () => {
   });
   it("renders an unresolved reference as its text and omits an empty notes section", () => {
     expect(renderHtml(parse("A[^missing].\n\n[^spare]: Unused."))).toBe("<p>A[^missing].</p>");
-    expect(renderHtml({type:"document",version:1,body:[paragraph(reference("gone"))]})).toBe("<p>[^gone]</p>");
+    expect(renderHtml({type:"document",version:1,syntax:"compatible",body:[paragraph(reference("gone"))]})).toBe("<p>[^gone]</p>");
   });
 });

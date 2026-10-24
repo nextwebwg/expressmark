@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Rename the explicit Expressive Markdown syntax from `modern` to `standard` in
+  options, document ASTs and `markdownSyntax` frontmatter. No compatibility alias
+  is provided; update callers and stored documents. The default is now `standard`; opt into
+  `compatible` for the former CommonMark/GFM reading. Invalid runtime option
+  values now fail explicitly.
+- Filter authored HTML-element spellings when a document read with trusted HTML
+  is written with the safe profile.
+
 ## 0.1.18
 
 - Update Parseman to 0.55.2 and markdown-it to 15.0.3. Every corpus README and

@@ -1,5 +1,5 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { expect, it } from "vitest";
-import { parse, stringify } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
 
 it("preserves layout identity, logical alignment, floating and RTL content through Markdown", () => {

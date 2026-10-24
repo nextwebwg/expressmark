@@ -62,7 +62,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
   const allowed = (name: string) => allowedElement(name, options.trustedHtml);
   const shownElement = (name: string) => warn(diagnostics, "html-element-escaped", `<${name}> is outside the safe HTML profile; it is shown as text.`);
   const authored = (html: string) => { const result = normalizeTags(html, allowed, false); result.shown.forEach(shownElement); return result.html; };
-  const modernDocument = document.syntax === "modern";
+  const standardDocument = document.syntax !== "compatible";
   const hook = options.escapeText;
   function text(value: string): string {
     const escaped = escapeHtml(value);
@@ -182,7 +182,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       case "title": case "literal": return content(node);
       case "text": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "span", content(node)) : content(node);
       // A closing tag never creates an element: a stray one, kept for writing, renders nothing.
-      case "html": return modernDocument && /^<\/[A-Za-z][A-Za-z0-9-]*[^>]*>$/.test(node.value ?? "") ? "" : authored(node.value ?? "");
+      case "html": return standardDocument && /^<\/[A-Za-z][A-Za-z0-9-]*[^>]*>$/.test(node.value ?? "") ? "" : authored(node.value ?? "");
       case "paragraph": return element(node, "p", content(node));
       case "heading":
         if (!Number.isInteger(node.level) || node.level! < 1 || node.level! > 6) throw new ConversionError("unsupported-html-node", "HTML headings need a level from 1 to 6.");

@@ -1,9 +1,14 @@
-# Syntax: `modern` and `compatible`
+# Syntax: `standard` and `compatible`
+
+Since 0.2.0, `standard` replaces the former `modern` name without an alias.
+Update option values, stored AST `syntax` values and `markdownSyntax` frontmatter.
+Invalid runtime options throw; unknown frontmatter values remain metadata and
+report `invalid-syntax`. The default is now `standard`.
 
 Expressmark reads Markdown in one of two syntaxes:
 
-- **`modern`** is the [Expressive Markdown specification](https://nextwebwg.org/expressive-markdown/).
-- **`compatible`** is the default. It is CommonMark 0.31.2 and GFM, plus the
+- **`standard`**, the default, follows the [Expressive Markdown specification](https://nextwebwg.org/expressive-markdown/).
+- **`compatible`** is an explicit opt-in to CommonMark 0.31.2 and GFM, plus the
   Expressive Markdown extensions, so existing Markdown renders as it does
   elsewhere.
 
@@ -14,7 +19,7 @@ Set the syntax in configuration: the options object you pass to `parse` and
 `markdownSyntax`.
 
 ```ts
-const options = { syntax: "modern" } as const;
+const options = { syntax: "standard" } as const;
 const document = parse(source, options);
 const markdown = stringify(document, options);
 ```
@@ -28,18 +33,18 @@ markdownSyntax: compatible
 ---
 ```
 
-The key's values are `modern` and `compatible`; any other value stays ordinary
+The key's values are `standard` and `compatible`; any other value stays ordinary
 metadata and reports `invalid-syntax`. Inside expressmark's API the option is
 named `syntax`, and the document records the syntax that read it as
-`document.syntax`: `"modern"` for a `modern` document, and the authored value
-when frontmatter sets the key. A document without it is `compatible`.
+`document.syntax` when it is `compatible` or frontmatter sets it. An absent
+value means `standard`, including on manually built documents.
 `stringify` writes `markdownSyntax` when the document's syntax differs from the
 `syntax` option it is given, and keeps authored frontmatter as written.
 
 ## Where `compatible` follows CommonMark and GFM
 
 `compatible` reads these constructs as CommonMark 0.31.2 and GFM read them. The
-Expressive Markdown specification states the `modern` reading of each one,
+Expressive Markdown specification states the `standard` reading of each one,
 with an example of both.
 
 | Construct | `compatible` |
@@ -65,7 +70,7 @@ Title
 ```html
 <!-- compatible -->
 <h2>Title</h2>
-<!-- modern -->
+<!-- standard -->
 <p>Title</p><hr>
 ```
 
@@ -86,7 +91,7 @@ Both syntaxes read HTML elements the same way, as the specification states:
 
 `compatible` still finds raw HTML with CommonMark's conditions, and keeps it as
 `html` nodes that `stringify` writes back byte for byte. Rendering applies the
-rules above. `modern` reads elements into `htmlElement` nodes, whose content is
+rules above. `standard` reads elements into `htmlElement` nodes, whose content is
 Markdown.
 
 ## Expressive Markdown extensions in `compatible` documents
@@ -97,19 +102,19 @@ content is Markdown read with the document's syntax, so inside a `compatible`
 container indented code, setext headings and lazy continuation behave as
 CommonMark's do, with indentation counted from the fence's edge. An alert is a
 block quote, so it continues lazily in `compatible` and needs `>` on every line
-in `modern`.
+in `standard`.
 
-## Moving a document to `modern`
+## Moving a document to `standard`
 
 Most documents read the same way in both syntaxes. These readings change as
 the specification intends, and are worth checking when a document moves:
 
 - **`\|` inside a table code span.** GFM authors write `` `a \| b` `` so the pipe
-  stays in its cell. In `modern` a code span is literal, so the backslash shows;
+  stays in its cell. In `standard` a code span is literal, so the backslash shows;
   write `` `a | b` ``. The `table-code-pipe` [lint rule](lint.md) flags it in
   `compatible` documents.
 - **A parenthesized phrase after brackets.** `[url](some words)` is a link to
-  `some%20words` in `modern`, since a link target may hold spaces; write
+  `some%20words` in `standard`, since a link target may hold spaces; write
   `[url]\(some words)` to keep the text.
 - **Indented code, setext headings and trailing-space breaks** read as text, a
   thematic break and a soft break. The lint rules `prefer-fenced-code`,
@@ -121,10 +126,10 @@ the specification intends, and are worth checking when a document moves:
 
 | Code | Syntax | Meaning |
 | --- | --- | --- |
-| `invalid-syntax` | both | The frontmatter `markdownSyntax` value is not `modern` or `compatible`. |
-| `duplicate-definition` | both | A link reference label is defined more than once. `modern` uses the last definition, `compatible` the first. |
-| `mixed-indentation` | both | A list's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `modern`, and as a [lint rule](lint.md) in `compatible`. |
-| `unclosed-html-element` | `modern` | An element has no closing tag; it ends at its first blank line, or with its paragraph. |
+| `invalid-syntax` | both | The frontmatter `markdownSyntax` value is not `standard` or `compatible`. |
+| `duplicate-definition` | both | A link reference label is defined more than once. `standard` uses the last definition, `compatible` the first. |
+| `mixed-indentation` | both | A list's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `standard`, and as a [lint rule](lint.md) in `compatible`. |
+| `unclosed-html-element` | `standard` | An element has no closing tag; it ends at its first blank line, or with its paragraph. |
 | `stray-end-tag` | both | An end tag closes no open element and is ignored. |
 | `br-end-tag` | both | `</br>` is read as `<br>`; write `<br>`. A [lint rule](lint.md). |
 | `html-element-escaped` | both | An element outside the safe HTML profile is shown as text. |

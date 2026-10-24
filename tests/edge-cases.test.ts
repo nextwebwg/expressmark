@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { expect, it } from "vitest";
-import { parse, stringify, type Document } from "../src/index.js";
+import { type Document } from "../src/index.js";
 import { semantic } from "./semantic.js";
 
 it.each([
@@ -13,7 +14,7 @@ it.each([
   "+5 is positive.", "-5 is negative.", "=value is an assignment.", "=", "===", "--",
   "[x] is ordinary paragraph text.",
 ])("writes literal prose without redundant punctuation escapes: %s", value => {
-  const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+  const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value}]};
   expect(parse(value)).toEqual(document);
   expect(stringify(document)).toBe(`${value}\n`);
   expect(parse(stringify(document))).toEqual(document);
@@ -21,10 +22,10 @@ it.each([
 
 it("uses the enclosing block context for literal punctuation",()=> {
   for(const value of ["1. item", "- item", "# heading", "| line"]) {
-    const heading: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
+    const heading: Document={type:"document",version:1,syntax:"compatible",body:[{type:"heading",level:2,value}]};
     expect(stringify(heading)).toBe(`## ${value}\n`);
     expect(parse(stringify(heading))).toEqual(heading);
-    const line: Document={type:"document",version:1,body:[{type:"lineBlock",value}]};
+    const line: Document={type:"document",version:1,syntax:"compatible",body:[{type:"lineBlock",value}]};
     expect(stringify(line)).toBe(`| ${value}\n`);
     expect(parse(stringify(line))).toEqual(line);
   }
@@ -39,7 +40,7 @@ it("keeps unmatched backticks literal inside directive labels and titles",()=> {
     expect(stringify(document)).toBe(source);
     expect(parse(stringify(document))).toEqual(document);
   }
-  const document: Document={type:"document",version:1,title:{type:"title",value:"Unmatched [ range"},body:[]};
+  const document: Document={type:"document",version:1,syntax:"compatible",title:{type:"title",value:"Unmatched [ range"},body:[]};
   expect(stringify(document)).not.toContain("\\[");
   expect(semantic(parse(stringify(document)))).toEqual(document);
   const code=parse(":chip[`a\\`]");
@@ -59,11 +60,11 @@ it("keeps syntax-shaped literal text literal in its full writing context",()=> {
     const paragraph=value.includes("\n") ? {type:"paragraph",children:value.split("\n").flatMap((line,index)=>[
       ...(index ? [{type:"softBreak"}]:[]),{type:"text",value:line},
     ])}:{type:"paragraph",value};
-    const document: Document={type:"document",version:1,body:[paragraph]};
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[paragraph]};
     expect(parse(stringify(document)),value).toEqual(document);
   }
   for(const checked of ["x", " "]) {
-    const document: Document={type:"document",version:1,body:[{type:"list",ordered:false,tight:true,children:[
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"list",ordered:false,tight:true,children:[
       {type:"listItem",body:[{type:"paragraph",value:`[${checked}] literal task marker`}]},
     ]}]};
     expect(parse(stringify(document))).toEqual(document);
@@ -84,14 +85,14 @@ it("preserves punctuation where inline nodes meet or nest",()=> {
     [{type:"delete",value:"~"}],
   ];
   for(const children of nodes) {
-    const document: Document={type:"document",version:1,body:[{type:"paragraph",children}]};
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children}]};
     expect(parse(stringify(document)),JSON.stringify(children)).toEqual(document);
   }
-  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"a * b and @word"}]}]})).toBe("**a * b and \\@word**\n");
-  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"@word"}]}]})).toBe("**@word**\n");
-  expect(stringify({type:"document",version:1,body:[{type:"heading",level:2,value:"Set {name} today"}]})).toBe("## Set {name} today\n");
+  expect(stringify({type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[{type:"strong",value:"a * b and @word"}]}]})).toBe("**a * b and \\@word**\n");
+  expect(stringify({type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[{type:"strong",value:"@word"}]}]})).toBe("**@word**\n");
+  expect(stringify({type:"document",version:1,syntax:"compatible",body:[{type:"heading",level:2,value:"Set {name} today"}]})).toBe("## Set {name} today\n");
   for(const value of ["Title {name}","Title #",'Title {a="x\\"}']) {
-    const document: Document={type:"document",version:1,body:[{type:"heading",level:2,value}]};
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"heading",level:2,value}]};
     expect(parse(stringify(document))).toEqual(document);
   }
 });
@@ -100,7 +101,7 @@ it("preserves literal punctuation across enclosing inline and block contexts",()
   for(const value of ["[", "]", "[x]", "\\", "`", "``", "*", "**", "_", "~", "~~", "@word", ":chip[a\\]", '{a="x\\"}', "x < 5", "a | b"]) {
     for(const type of ["paragraph", "heading", "lineBlock", "strong", "emphasis", "delete", "link", "inline"]) {
       const node={type,value,...(type === "heading" ? {level:2}:{}),...(type === "link" ? {url:"target"}:{}),...(type === "inline" ? {subType:"chip"}:{})};
-      const document: Document={type:"document",version:1,body:[
+      const document: Document={type:"document",version:1,syntax:"compatible",body:[
         ["paragraph","heading","lineBlock"].includes(type) ? node:{type:"paragraph",children:[node]},
       ]};
       expect(parse(stringify(document)),`${type}: ${JSON.stringify(value)}`).toEqual(document);
@@ -117,10 +118,10 @@ it("writes prose colons without unnecessary escapes in paragraphs and lists",()=
 });
 it("keeps directive-shaped literal text and text beside links literal",()=> {
   for(const value of ["::toc","::: warning",":chip[label]{kind=plain}"]) {
-    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value}]};
     expect(parse(stringify(document))).toEqual(document);
   }
-  const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+  const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
     {type:"text",value:"Literal :chip"},{type:"link",value:"docs",url:"https://example.test"},
   ]}]};
   expect(parse(stringify(document))).toEqual(document);
@@ -128,7 +129,7 @@ it("keeps directive-shaped literal text and text beside links literal",()=> {
 
 it("keeps a literal colon before an inline directive from opening a leaf block",()=> {
   for(const continued of [false,true]) {
-    const document: Document={type:"document",version:1,body:[{type:"paragraph",children:[
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
       ...(continued ? [{type:"text",value:"Text"},{type:"softBreak"}]:[]),
       {type:"text",value:":"},{type:"inline",subType:"chip",value:"Ready"},
     ]}]};
@@ -170,7 +171,7 @@ it("writes intraword underscores and email link labels without unnecessary escap
 });
 it("preserves explicitly plain URL and email text without creating autolinks",()=> {
   for(const value of ["https://example.test", "HTTP://example.test/path", "ftp://example.test/file", "www.example.test", "support@example.test"]) {
-    const document: Document={type:"document",version:1,body:[{type:"paragraph",value}]};
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value}]};
     expect(parse(stringify(document))).toEqual(document);
   }
   for(const source of ["https://example.test", "www.example.test", "support@example.test"]) {
@@ -183,9 +184,9 @@ it("preserves explicitly plain URL and email text without creating autolinks",()
 it("preserves literal text split across adjacent nodes without mutating the AST",()=> {
   for(const values of [["https","://example.test"],["www",".example.test"],[":ch","ip[Ready]"]]) {
     for(const emptyAttributes of [false,true]) {
-      const document: Document={type:"document",version:1,body:[{type:"paragraph",children:values.map(value=>({type:"text",value,...(emptyAttributes ? {attributes:{}}:{})}))}]};
+      const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:values.map(value=>({type:"text",value,...(emptyAttributes ? {attributes:{}}:{})}))}]};
       const original=structuredClone(document);
-      expect(parse(stringify(document))).toEqual({type:"document",version:1,body:[{type:"paragraph",value:values.join("")}]});
+      expect(parse(stringify(document))).toEqual({type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value:values.join("")}]});
       expect(document).toEqual(original);
     }
   }
@@ -206,7 +207,7 @@ it("preserves ordinary document spacing, nested lists, tables, containers and ta
 
 it("preserves marked whitespace and neighboring rich content through Markdown",()=> {
   for(const type of ["strong","emphasis","delete"]) for(const value of ["Hello "," Hello"," ","\tHello\t","\u00a0Hello\u00a0"]) {
-    const document={type:"document",version:1,body:[{type:"paragraph",children:[
+    const document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
       {type,value},{type:"inline",subType:"mention",value:"Ada",ref:"user-123"},
     ]}]} as const;
     expect(parse(stringify(document as never)),`${type}: ${JSON.stringify(value)}`).toEqual(document);
@@ -220,18 +221,18 @@ it("preserves adjacent and nested marks rather than merging their delimiters",()
     [{type:"text",value:"before"},{type:"emphasis",value:"🧶"},{type:"text",value:"after"}],
   ];
   for(const children of nodes) {
-    const document={type:"document",version:1,body:[{type:"paragraph",children}]} as const;
+    const document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children}]} as const;
     expect(parse(stringify(document as never))).toEqual(document);
   }
-  expect(stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"strong",value:"Ordinary"}]}]})).toBe("**Ordinary**\n");
+  expect(stringify({type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[{type:"strong",value:"Ordinary"}]}]})).toBe("**Ordinary**\n");
 });
 it("keeps literal character-reference text rather than decoding it on reparse",()=> {
-  const document={type:"document",version:1,body:[{type:"paragraph",value:"Use &copy;, &#32; and &#x41; literally; A & B stays readable."}]} as const;
+  const document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value:"Use &copy;, &#32; and &#x41; literally; A & B stays readable."}]} as const;
   expect(parse(stringify(document as never))).toEqual(document);
   expect(stringify(document as never)).toContain("A & B");
 });
 it("preserves empty and whitespace-only paragraphs between authored blocks",()=> {
-  const document={type:"document",version:1,body:[{type:"paragraph",value:"Before"},
+  const document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value:"Before"},
     {type:"paragraph",value:""},{type:"paragraph",value:" \t"},{type:"paragraph",value:"After"}]} as const;
   expect(parse(stringify(document as never))).toEqual(document);
 });
@@ -247,8 +248,8 @@ it("diagnoses duplicate IDs without rewriting identities",()=> {
   expect(diagnostics).toContainEqual(expect.objectContaining({code:"duplicate-id"}));
 });
 it("rejects invalid AST child contexts and broken table grids",()=> {
-  expect(()=>stringify({type:"document",version:1,body:[{type:"paragraph",children:[{type:"paragraph",value:"invalid"}]}]})).toThrow(/inline/);
-  expect(()=>stringify({type:"document",version:1,body:[{type:"table",children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"}]},{type:"tableRow",children:[{type:"tableCell",value:"B",colSpan:2}]}]}]})).toThrow(/span/);
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[{type:"paragraph",value:"invalid"}]}]})).toThrow(/inline/);
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"table",children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"}]},{type:"tableRow",children:[{type:"tableCell",value:"B",colSpan:2}]}]}]})).toThrow(/span/);
 });
 it("preserves duplicate YAML final values and custom reserved structural metadata",()=> {
   const diagnostics: unknown[]=[];
@@ -288,7 +289,7 @@ it("keeps code spans inside a represented line and uses safe fence metadata",()=
   const doc=parse('| One `not\n| code` line');
   expect(JSON.stringify(doc)).not.toContain('"inlineCode"');
   expect(parse(stringify(doc))).toEqual(doc);
-  const code={type:"document",version:1,body:[{type:"code",value:"```\n~~~",language:"custom`lang"}]} as const;
+  const code={type:"document",version:1,syntax:"compatible",body:[{type:"code",value:"```\n~~~",language:"custom`lang"}]} as const;
   expect(parse(stringify(code as never))).toEqual(code);
 });
 it("builds merged table cells instead of line blocks",()=> {
@@ -297,13 +298,13 @@ it("builds merged table cells instead of line blocks",()=> {
   expect(doc.body[0]?.children?.[1]?.children?.[0]).toMatchObject({type:"tableCell",value:"Span",colSpan:2,rowSpan:2});
 });
 it("keeps an ordinary list label that resembles a task unchecked",()=> {
-  const doc={type:"document",version:1,body:[{type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[{type:"paragraph",value:"[x] Done"}]}]}]} as const;
+  const doc={type:"document",version:1,syntax:"compatible",body:[{type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[{type:"paragraph",value:"[x] Done"}]}]}]} as const;
   expect(parse(stringify(doc as never))).toEqual(doc);
 });
 it("normalizes absent optional nulls while preserving null metadata and rejecting non-JSON data",()=> {
-  const doc={type:"document",version:1,id:null,title:null,metadata:{custom:null},body:[{type:"paragraph",value:"Text",children:null,attributes:null}]} as never;
-  expect(semantic(parse(stringify(doc)))).toEqual({type:"document",version:1,metadata:{custom:null},body:[{type:"paragraph",value:"Text"}]});
-  expect(()=>stringify({type:"document",version:1,metadata:{number:Infinity},body:[]})).toThrow(/JSON/);
+  const doc={type:"document",version:1,syntax:"compatible",id:null,title:null,metadata:{custom:null},body:[{type:"paragraph",value:"Text",children:null,attributes:null}]} as never;
+  expect(semantic(parse(stringify(doc)))).toEqual({type:"document",version:1,syntax:"compatible",metadata:{custom:null},body:[{type:"paragraph",value:"Text"}]});
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",metadata:{number:Infinity},body:[]})).toThrow(/JSON/);
 });
 it("rejects malformed supplied scalar fields, metadata, groups and rich grids",()=> {
   const invalid=[
@@ -318,14 +319,14 @@ it("rejects malformed supplied scalar fields, metadata, groups and rich grids",(
     {type:"table",children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",attributes:{class:"rich"},value:"gap"}]}]},
     {type:"table",align:["invalid"],children:[{type:"tableRow",children:[{type:"tableCell",value:"A"}]}]},
   ];
-  for(const node of invalid) expect(()=>stringify({type:"document",version:1,body:[node]} as never),JSON.stringify(node)).toThrow(expect.objectContaining({name:"ConversionError"}));
-  expect(()=>stringify({type:"document",version:1,metadata:[],body:[]} as never)).toThrow(/mapping/);
-  expect(()=>stringify({type:"document",version:1,body:[{type:"container",subType:"note",title:{type:"title",children:[{type:"text",value:"One"},{type:"break"},{type:"text",value:"Two"}]},body:[]}]})).toThrow(/title/);
+  for(const node of invalid) expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[node]} as never),JSON.stringify(node)).toThrow(expect.objectContaining({name:"ConversionError"}));
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",metadata:[],body:[]} as never)).toThrow(/mapping/);
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"container",subType:"note",title:{type:"title",children:[{type:"text",value:"One"},{type:"break"},{type:"text",value:"Two"}]},body:[]}]})).toThrow(/title/);
 });
 it("rejects one-line identity and tight-wrapper title violations without corrupting source",()=> {
-  expect(()=>stringify({type:"document",version:1,body:[{type:"heading",level:2,id:"line\nbreak",value:"Title"}]})).toThrow(/ID/);
-  expect(()=>stringify({type:"document",version:1,body:[{type:"container",subType:"note",title:{type:"title",value:" padded "},body:[]}]})).toThrow(/title/);
-  const root={type:"document",version:1,id:"line\nbreak",body:[]} as const;
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"heading",level:2,id:"line\nbreak",value:"Title"}]})).toThrow(/ID/);
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"container",subType:"note",title:{type:"title",value:" padded "},body:[]}]})).toThrow(/title/);
+  const root={type:"document",version:1,syntax:"compatible",id:"line\nbreak",body:[]} as const;
   expect(semantic(parse(stringify(root as never)))).toEqual(root);
 });
 it("quotes attributes with grammar escapes, retaining literal tabs and backslash text",()=> {
@@ -335,10 +336,10 @@ it("quotes attributes with grammar escapes, retaining literal tabs and backslash
 });
 it("rejects metadata fields that cannot retain their designated AST home",()=> {
   for(const metadata of [{tags:2},{tags:["valid",2]},{description:3},{id:"orphan"},{title:"orphan"}]) {
-    expect(()=>stringify({type:"document",version:1,metadata,body:[]} as never)).toThrow(expect.objectContaining({name:"ConversionError"}));
+    expect(()=>stringify({type:"document",version:1,syntax:"compatible",metadata,body:[]} as never)).toThrow(expect.objectContaining({name:"ConversionError"}));
   }
   const diagnostics: unknown[]=[];
-  const source=stringify({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{id:"shadow",title:"Shadow",description:"Valid **description**",tags:["valid"],custom:null},body:[]},{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(semantic(parse(source))).toEqual({type:"document",version:1,id:"designated",title:{type:"title",value:"Designated"},metadata:{description:"Valid **description**",tags:["valid"],custom:null},body:[]});
+  const source=stringify({type:"document",version:1,syntax:"compatible",id:"designated",title:{type:"title",value:"Designated"},metadata:{id:"shadow",title:"Shadow",description:"Valid **description**",tags:["valid"],custom:null},body:[]},{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
+  expect(semantic(parse(source))).toEqual({type:"document",version:1,syntax:"compatible",id:"designated",title:{type:"title",value:"Designated"},metadata:{description:"Valid **description**",tags:["valid"],custom:null},body:[]});
   expect(diagnostics.filter((value: unknown)=>(value as {code:string}).code === "metadata-conflict")).toHaveLength(2);
 });

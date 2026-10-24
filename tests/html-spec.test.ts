@@ -1,6 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parse, stringify } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
 import { sanitizeHtml, type HtmlAllowlist } from "../src/html.js";
 

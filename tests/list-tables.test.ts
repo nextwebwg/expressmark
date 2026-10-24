@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { type Diagnostic, type Document, type Node } from "../src/index.js";
 import { semantic } from "./semantic.js";
 
 const p = (value: string): Node => ({type:"paragraph",value});
@@ -11,7 +12,7 @@ const source = (body: string, settings = ""): string => `::: table${settings ? `
 function check(markdown: string, expected: Node[]): Document {
   const diagnostics: Diagnostic[]=[];
   const document=parse(markdown,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(semantic(document)).toEqual({type:"document",version:1,body:expected});
+  expect(semantic(document)).toEqual({type:"document",version:1,syntax:"compatible",body:expected});
   const output=stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
   expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
   expect(diagnostics).toEqual([]);
@@ -185,7 +186,7 @@ it("keeps table content safe and code literal across both conversion boundaries"
 });
 
 it("writes editable list-table source for both simple and rich cells",()=> {
-  const document: Document={type:"document",version:1,body:[table(row(cell("A",true),cell("B",true)),row(cell("Value"),{type:"tableCell",body:[p("First"),p("Second")]}))]};
+  const document: Document={type:"document",version:1,syntax:"compatible",body:[table(row(cell("A",true),cell("B",true)),row(cell("Value"),{type:"tableCell",body:[p("First"),p("Second")]}))]};
   const output=stringify(document);
   expect(output).toContain('::: table');
   expect(output).not.toContain('<table');

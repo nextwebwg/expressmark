@@ -63,9 +63,9 @@ describe("colon fences", () => {
     expect(seen).toEqual(["unclosed-container"]);
     expect(semantic(parse(":::: outer\n::: inner\nA\n::::\n\nAfter").body)).toEqual([{type:"container",subType:"outer",body:[{type:"container",subType:"inner",body:[{type:"paragraph",value:"A"}]}]},{type:"paragraph",value:"After"}]);
   });
-  it("strip a fence's own indentation from the lines it encloses", () => {
-    expect(semantic(parse("  ::: note\n      four after stripping\n  :::").body[0]!.body)).toEqual([{type:"code",value:"four after stripping"}]);
-    expect(semantic(parse("  ::: note\n     three after stripping\n  :::").body[0]!.body)).toEqual([{type:"paragraph",value:"three after stripping"}]);
+  it("strips a fence's indentation before interpreting compatible indented code", () => {
+    expect(semantic(parse("  ::: note\n      four after stripping\n  :::", {syntax:"compatible"}).body[0]!.body)).toEqual([{type:"code",value:"four after stripping"}]);
+    expect(semantic(parse("  ::: note\n     three after stripping\n  :::", {syntax:"compatible"}).body[0]!.body)).toEqual([{type:"paragraph",value:"three after stripping"}]);
   });
 });
 
