@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { parse, stringify, type Document } from "../src/index.js";
+import { type Document } from "../src/index.js";
 import { semantic } from "./semantic.js";
 
 // Each case once crashed parsing or writing, or lost content.

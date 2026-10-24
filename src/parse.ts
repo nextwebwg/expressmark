@@ -5,9 +5,9 @@ import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, contentHash, contentHashes, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
-import { installModern, modernRules, type ModernRule } from "./modern.js";
+import { installStandard, standardRules, type StandardRule } from "./standard.js";
 import type { ConversionOptions, Document, Json, Node, Position, Syntax } from "./types.js";
-import { linting, warn } from "./types.js";
+import { linting, validateSyntax, warn } from "./types.js";
 import { lint } from "./lint.js";
 
 function line(state: StateBlock, index: number): string {
@@ -46,11 +46,12 @@ function codeFence(node: Node): string {
   return marker.repeat(Math.max(3,...Array.from((node.value ?? "").matchAll(new RegExp(`${marker}+`,"g")),m=>m[0].length+1)));
 }
 export function parse(markdown: string, options: ConversionOptions = {}): Document {
+  validateSyntax(options.syntax);
   spelled=false;
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
   const document: Document = {type:"document",version:1,body:[]};
-  // The `modern` rules in force, known once the frontmatter is read.
-  const modern=new Set<ModernRule>();
+  // The `standard` rules in force, known once the frontmatter is read.
+  const standard=new Set<StandardRule>();
   // Lint warnings report the source lines of the block holding each construct.
   const positions=new WeakMap<Node,Position>();
   let lineOffset=0;
@@ -172,7 +173,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const opened=state.push("footnote_open","",1); opened.meta={label:match[1]}; const lines: [number,number]=[start,start+1]; opened.map=lines;
     // Read the note like a list item: its first line starts after the marker,
     // and its continuation lines are indented four columns past the marker, or
-    // in `modern` syntax, past the marker by any amount, as list nesting is.
+    // in `standard` syntax, past the marker by any amount, as list nesting is.
     const saved={bMark:state.bMarks[start]!,tShift:state.tShift[start]!,sCount:state.sCount[start]!,parentType:state.parentType};
     let position=begin+match[0].length;
     const contentStart=position;
@@ -186,7 +187,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     state.sCount[start]=offset-initial;
     state.bMarks[start]=contentStart;
     const outer=state.blkIndent;
-    state.blkIndent=modern.has("relativeLists") ? saved.sCount+1 : outer+4;
+    state.blkIndent=standard.has("relativeLists") ? saved.sCount+1 : outer+4;
     state.parentType="footnote" as typeof state.parentType;
     if(state.sCount[start]! < state.blkIndent) state.sCount[start]!+=state.blkIndent;
     state.md.block.tokenize(state,start,end);
@@ -216,8 +217,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     // markdown-it's own token keeps only the normalized label; record the authored one.
     const raw=/^\[((?:\\[\s\S]|[^\\[\]])*)\]:/.exec(state.getLines(start,state.line,state.blkIndent,false).trimStart())!;
     if(key in outer) {
-      warn(options,"duplicate-definition",`Link reference [${raw[1]}] is defined more than once; the ${modern.has("lastDefinition") ? "last":"first"} definition is used.`);
-      if(modern.has("lastDefinition")) outer[key]=value;
+      warn(options,"duplicate-definition",`Link reference [${raw[1]}] is defined more than once; the ${standard.has("lastDefinition") ? "last":"first"} definition is used.`);
+      if(standard.has("lastDefinition")) outer[key]=value;
     } else outer[key]=value;
     state.tokens.at(-1)!.meta={label:raw[1],url:value.href,title:value.title,markdown:state.getLines(start,state.line,state.blkIndent,false).trim()};
     return true;
@@ -454,7 +455,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     else if(slot.value !== undefined) node.value=slot.value;
     return [node];
   }
-  // A `modern` HTML tag within inline content, matched as HTML matches tags.
+  // A `standard` HTML tag within inline content, matched as HTML matches tags.
   function inlineElement(tokens: Token[], at: number, lineBlock: boolean): {nodes: Node[]; next: number} {
     const raw=tokens[at]!.content;
     const end=/^<\/([A-Za-z][A-Za-z0-9-]*)[^>]*>$/.exec(raw);
@@ -525,7 +526,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
         } else if(token.type === "html_raw_inline") {
           const meta=token.meta as {name:string;open:string;close?:string;value:string};
           nodes.push(...elementNodes(meta.name,meta.open,meta.close,"inline",{value:meta.value}));
-        } else if(token.type === "html_inline" && modern.has("html")) { const found=inlineElement(tokens,cursor-1,lineBlock); nodes.push(...found.nodes); cursor=found.next; }
+        } else if(token.type === "html_inline" && standard.has("html")) { const found=inlineElement(tokens,cursor-1,lineBlock); nodes.push(...found.nodes); cursor=found.next; }
         else if(token.type === "html_inline" && options.trustedHtml) { if(/^<\/br[\s>]/i.test(token.content)) if(linting(options.lint,"br-end-tag")) options.onDiagnostic?.({code:"br-end-tag",message:"</br> is read as <br>; write <br>.",severity:"warning",preferred:"<br>"}); nodes.push({type:"html",display:"inline",value:token.content}); }
         else if(token.type === "html_inline") {
           const open=/^<([a-z][\w:-]*)\b[^>]*>$/i.exec(token.content);
@@ -657,10 +658,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
             if(item.type === "paragraph_open" && item.level === token.level+2 && !item.hidden) loose=true;
             if(item.type === "list_item_open" && item.level === token.level+1 && items++ && item.info !== tokens[listStart]!.info) same=false;
           }
-          // A `modern` list splits at a blank line, so only its items can be loose.
-          node.tight=modern.has("looseLists") || !loose;
+          // A `standard` list splits at a blank line, so only its items can be loose.
+          node.tight=standard.has("looseLists") || !loose;
           // Lint: indentation that mixes tabs and spaces, between items or within one.
-          if(options.lint && !modern.has("relativeLists") && original === source && linting(options.lint,"mixed-indentation")) {
+          if(options.lint && !standard.has("relativeLists") && original === source && linting(options.lint,"mixed-indentation")) {
             const lead=(index: number)=>/^[ \t]*/.exec(lineAt(index))![0];
             const unrelated=(a: string, b: string)=>!a.startsWith(b) && !b.startsWith(a);
             const items=tokens.slice(listStart,cursor).filter(item=>item.type === "list_item_open" && item.level === token.level+1 && item.map);
@@ -814,9 +815,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           if(alignment.some(Boolean)) table.align=alignment;
           const originalRows=token.map ? original.split("\n").slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(splitRow) : rawCells;
           const hasMerges=originalRows.some(row=>row.some(cell=>/^[>^]$/.test(cell.trim())));
-          // Lint: `\|` in a cell's code span, which `modern` syntax keeps as written.
-          if(token.map && original === source && !modern.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(original.split("\n").slice(token.map[0],token.map[1]).join("\n")))
-            options.onDiagnostic?.({code:"table-code-pipe",message:"A code span in this table writes \\| for a pipe; in modern syntax the backslash shows, so write |.",severity:"warning",preferred:"| inside the code span",position:{start:{line:token.map[0]+lineOffset+1,column:1},end:{line:token.map[1]+lineOffset,column:lineAt(token.map[1]-1).length+1}}});
+          // Lint: `\|` in a cell's code span, which `standard` syntax keeps as written.
+          if(token.map && original === source && !standard.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(original.split("\n").slice(token.map[0],token.map[1]).join("\n")))
+            options.onDiagnostic?.({code:"table-code-pipe",message:"A code span in this table writes \\| for a pipe; in standard syntax the backslash shows, so write |.",severity:"warning",preferred:"| inside the code span",position:{start:{line:token.map[0]+lineOffset+1,column:1},end:{line:token.map[1]+lineOffset,column:lineAt(token.map[1]-1).length+1}}});
           const invalid=hasMerges && originalRows.some(row=>row.length !== (rows[0]?.children?.length ?? 0)) ? "Merged tables require every authored row to supply the same column count." : mergeTable(table,rawCells);
           if(invalid) {
             const range=token.map;
@@ -881,8 +882,8 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       if(map.description !== undefined && typeof map.description !== "string") throw new Error("Frontmatter description must be a string.");
       if(map.tags !== undefined && (!Array.isArray(map.tags) || !map.tags.every(tag=>typeof tag === "string"))) throw new Error("Frontmatter tags must be a string list.");
       if(map.markdownSyntax !== undefined) {
-        if(map.markdownSyntax === "modern" || map.markdownSyntax === "compatible") { frontSyntax=map.markdownSyntax; delete map.markdownSyntax; }
-        else warn(options,"invalid-syntax","Frontmatter markdownSyntax must be modern or compatible; it was kept as metadata.");
+        if(map.markdownSyntax === "standard" || map.markdownSyntax === "compatible") { frontSyntax=map.markdownSyntax; delete map.markdownSyntax; }
+        else warn(options,"invalid-syntax","Frontmatter markdownSyntax must be standard or compatible; it was kept as metadata.");
       }
       if(typeof map.id === "string") { document.id=map.id; delete map.id; }
       if(typeof map.title === "string") { documentTitle=map.title; delete map.title; }
@@ -896,13 +897,13 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     lineOffset=front[0].split("\n").length-1;
     source=source.slice(front[0].length);
   }
-  const syntax: Syntax=frontSyntax ?? options.syntax ?? "compatible";
-  if(syntax === "modern") {
-    // `modernRules` selects single rules for measurement; documents use them all.
-    for(const rule of (options as {modernRules?: readonly ModernRule[]}).modernRules ?? modernRules) modern.add(rule);
-    installModern(md,lexicalMd,modern,options);
+  const syntax: Syntax=frontSyntax ?? options.syntax ?? "standard";
+  if(syntax === "standard") {
+    // `standardRules` selects single rules for measurement; documents use them all.
+    for(const rule of (options as {standardRules?: readonly StandardRule[]}).standardRules ?? standardRules) standard.add(rule);
+    installStandard(md,lexicalMd,standard,options);
   }
-  if(syntax === "modern" || frontSyntax) document.syntax=syntax;
+  if(syntax === "compatible" || frontSyntax) document.syntax=syntax;
   document.body=normalizeTabs(blocks(md.parse(source,env),source));
   if(documentTitle !== undefined) document.title=compact({type:"title"},inline(documentTitle));
   const notes=footnoteDefinitions(document);
@@ -932,7 +933,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   };
   if(spelled) fences(document);
   // CommonMark's HTML blocks can split an element, so stray end tags are found across the document.
-  if(!modern.has("html")) {
+  if(!standard.has("html")) {
     const values: string[]=[];
     const collect=(node: Node): void => { if(node.type === "html" && node.value) values.push(node.value); for(const child of node.body ?? node.children ?? []) collect(child); };
     collect(document);

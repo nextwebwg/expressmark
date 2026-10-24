@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { anchorText, headingAnchors, parse, stringify, type HtmlAllowlist } from "../src/index.js";
+import { anchorText, headingAnchors, type HtmlAllowlist } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
 
 const authored = [

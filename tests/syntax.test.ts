@@ -3,40 +3,69 @@ import { parse, stringify, type ConversionOptions, type Syntax } from "../src/in
 import { renderHtml } from "../src/render.js";
 import type { HtmlAllowlist } from "../src/html.js";
 
-// Each `modern` case is an example in the Expressive Markdown spec; each
+// Each `standard` case is an example in the Expressive Markdown spec; each
 // `compatible` case is an example in docs/syntax.md, where expressmark follows
 // CommonMark 0.31.2 and GFM.
 const allow: HtmlAllowlist = { tags: ["x-embed", "x-a", "kbd", "select", "option", "script", "textarea", "template", "style"], attributes: { "*": ["video", "src", "type", "href", "align"] } };
 const normalize = (html: string) => html.replace(/>\s+</g, "><").trim();
-function render(markdown: string, syntax: Syntax = "modern", options: ConversionOptions = {}): string {
+function render(markdown: string, syntax: Syntax = "standard", options: ConversionOptions = {}): string {
   return normalize(renderHtml(parse(markdown, { syntax, trustedHtml: true, ...options }), { trustedHtml: allow }));
 }
-function codes(markdown: string, syntax: Syntax = "modern", options: ConversionOptions = {}): string[] {
+function codes(markdown: string, syntax: Syntax = "standard", options: ConversionOptions = {}): string[] {
   const seen: string[] = [];
   parse(markdown, { syntax, trustedHtml: true, ...options, onDiagnostic: diagnostic => seen.push(diagnostic.code) });
   return seen;
 }
 // `stringify` writes each document back as authored.
-function roundTrips(markdown: string, syntax: Syntax = "modern"): void {
+function roundTrips(markdown: string, syntax: Syntax = "standard"): void {
   expect(stringify(parse(markdown, { syntax, trustedHtml: true }), { syntax, trustedHtml: true })).toBe(markdown);
 }
 
 describe("syntax selection", () => {
-  it("reads compatible syntax by default and modern syntax when asked", () => {
-    expect(parse("Title\n---").body[0]?.type).toBe("heading");
-    expect(parse("Title\n---", { syntax: "modern" }).body.map(node => node.type)).toEqual(["paragraph", "horizontalRule"]);
+  it("filters recorded trusted HTML when writing with the safe default profile", () => {
+    for (const syntax of ["standard", "compatible"] as const) for (const source of [
+      '<div onclick="steal()">x</div>',
+      'Before <span onmouseover="steal()">x</span> after.',
+      '<a href="javascript:steal()">x</a>',
+    ]) {
+      const document = parse(source, {syntax, trustedHtml:true});
+      expect(stringify(document)).not.toMatch(/onclick|onmouseover|javascript:/);
+      expect(stringify(document, {syntax, trustedHtml:true})).toBe(source);
+      expect(renderHtml(parse(stringify(document)))).not.toMatch(/onclick|onmouseover|javascript:/);
+    }
+  });
+  it("rejects the removed modern option and AST value without a compatibility alias", () => {
+    const options = { syntax: "modern" } as unknown as ConversionOptions;
+    expect(() => parse("Text", options)).toThrow("Syntax must be compatible or standard");
+    expect(() => stringify(parse("Text"), options)).toThrow("Syntax must be compatible or standard");
+    expect(() => stringify({ ...parse("Text"), syntax: "modern" } as unknown as ReturnType<typeof parse>)).toThrow("syntax needs compatible or standard");
+    expect(codes("---\nmarkdownSyntax: modern\n---\nText", "compatible")).toContain("invalid-syntax");
+    expect(parse("---\nmarkdownSyntax: modern\n---\nText").metadata).toEqual({ markdownSyntax: "modern" });
+  });
+  it("defaults to the Expressive Markdown standard and offers explicit compatibility", () => {
+    for (const source of ["Title\n---", "    code", "> quoted\nnot quoted", "- a\n* b"]) {
+      expect(parse(source)).toEqual(parse(source, { syntax: "standard" }));
+    }
+    expect(parse("Title\n---").body.map(node => node.type)).toEqual(["paragraph", "horizontalRule"]);
+    expect(parse("Title\n---", { syntax: "compatible" }).body[0]?.type).toBe("heading");
   });
   it("lets frontmatter choose the syntax, over the host's default", () => {
-    const document = parse("---\nmarkdownSyntax: modern\n---\nTitle\n---");
-    expect(document.syntax).toBe("modern");
+    const document = parse("---\nmarkdownSyntax: standard\n---\nTitle\n---");
+    expect(document.syntax).toBe("standard");
     expect(document.metadata).toBeUndefined();
-    expect(parse("---\nmarkdownSyntax: compatible\n---\nTitle\n---", { syntax: "modern" }).body[0]?.type).toBe("heading");
+    expect(parse("---\nmarkdownSyntax: compatible\n---\nTitle\n---", { syntax: "standard" }).body[0]?.type).toBe("heading");
   });
   it("records the syntax and writes the key when it differs from the host's default", () => {
-    const document = parse("Text", { syntax: "modern" });
-    expect(document.syntax).toBe("modern");
-    expect(stringify(document)).toBe("---\nmarkdownSyntax: modern\n---\n\nText");
-    expect(stringify(document, { syntax: "modern" })).toBe("Text");
+    const document = parse("Text", { syntax: "standard" });
+    expect(document.syntax).toBeUndefined();
+    expect(stringify({ ...document, syntax: "standard" }, { syntax: "compatible" })).toBe("---\nmarkdownSyntax: standard\n---\n\nText");
+    expect(stringify(document, { syntax: "standard" })).toBe("Text");
+    expect(stringify(document, { syntax: "compatible" })).toContain("markdownSyntax: standard");
+    const compatible = parse("Title\n---", {syntax:"compatible"});
+    const portable = stringify(compatible);
+    expect(portable).toContain("markdownSyntax: compatible");
+    expect(parse(portable).body).toEqual(compatible.body);
+    expect(parse("---\nmarkdownSyntax: standard\n---\nTitle\n---", {syntax:"compatible"}).body.map(node => node.type)).toEqual(["paragraph","horizontalRule"]);
   });
   it("keeps an unknown syntax value as metadata, with a diagnostic", () => {
     expect(codes("---\nmarkdownSyntax: strict\n---\nText", "compatible")).toContain("invalid-syntax");
@@ -80,8 +109,8 @@ describe("HTML elements", () => {
     expect(codes("- <div>\n  open\n\nAfter")).toContain("unclosed-html-element");
   });
   it("reads the element nodes in both HTML profiles", () => {
-    for (const trustedHtml of [true, false]) expect(parse("<div>A</div>", { syntax: "modern", trustedHtml }).body[0]).toMatchObject({ type: "htmlElement", tag: "div", open: "<div>", close: "</div>" });
-    expect(parse("Press <kbd>Ctrl</kbd>", { syntax: "modern", trustedHtml: true }).body[0]?.children?.[1]).toMatchObject({ type: "htmlElement", display: "inline", tag: "kbd", value: "Ctrl" });
+    for (const trustedHtml of [true, false]) expect(parse("<div>A</div>", { syntax: "standard", trustedHtml }).body[0]).toMatchObject({ type: "htmlElement", tag: "div", open: "<div>", close: "</div>" });
+    expect(parse("Press <kbd>Ctrl</kbd>", { syntax: "standard", trustedHtml: true }).body[0]?.children?.[1]).toMatchObject({ type: "htmlElement", display: "inline", tag: "kbd", value: "Ctrl" });
   });
 });
 
@@ -99,7 +128,7 @@ describe("element boundaries", () => {
     expect(render("<div>a `` ` `` b</div>")).toBe("<div>a <code>`</code> b</div>");
   });
   it("keeps raw-text elements raw inside a paragraph", () => {
-    const document = parse("Run <script>if (a **b** c) `x` </script> now", { syntax: "modern", trustedHtml: true });
+    const document = parse("Run <script>if (a **b** c) `x` </script> now", { syntax: "standard", trustedHtml: true });
     expect(document.body[0]?.children?.[1]).toEqual({ type: "htmlElement", display: "inline", tag: "script", open: "<script>", close: "</script>", value: "if (a **b** c) `x` " });
     expect(render("Use <textarea>*not em*</textarea>.")).toBe("<p>Use <textarea>*not em*</textarea>.</p>");
     expect(render("a <style>p { x: 1 }")).toBe("<p>a <style>p { x: 1 }</style></p>");
@@ -110,7 +139,7 @@ describe("element boundaries", () => {
 
 describe("footnote continuation", () => {
   const source = "Note[^a].\n\n[^a]: First.\n\n  Second.\nOutside";
-  it("continues a note on lines indented past its marker in modern syntax", () => {
+  it("continues a note on lines indented past its marker in standard syntax", () => {
     expect(render(source)).toContain('<li id="fn:a"><p>First.</p><p>Second.');
     expect(render(source)).toContain("<p>Outside</p>");
   });
@@ -122,11 +151,11 @@ describe("footnote continuation", () => {
 describe("void elements", () => {
   const voids = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
   it.each(voids)("reads <%s> and <%s /> the same, at block level and inline", name => {
-    for (const syntax of ["modern", "compatible"] as const) {
+    for (const syntax of ["standard", "compatible"] as const) {
       const block = (tag: string) => JSON.stringify(parse(tag, { syntax, trustedHtml: true }).body.map(node => node.type));
       expect(block(`<${name}>`)).toBe(block(`<${name} />`));
     }
-    const inline = (tag: string) => parse(`a ${tag} b`, { syntax: "modern", trustedHtml: true }).body[0]?.children?.[1];
+    const inline = (tag: string) => parse(`a ${tag} b`, { syntax: "standard", trustedHtml: true }).body[0]?.children?.[1];
     expect(inline(`<${name}>`)).toMatchObject({ type: "htmlElement", display: "inline", tag: name });
     expect(inline(`<${name} />`)).toMatchObject({ type: "htmlElement", display: "inline", tag: name });
     expect(inline(`<${name}>`)?.children).toBeUndefined();
@@ -154,7 +183,7 @@ describe("implied end tags", () => {
 
 describe("self-closing elements", () => {
   it("closes every element written with />, in both syntaxes", () => {
-    for (const syntax of ["modern", "compatible"] as const) {
+    for (const syntax of ["standard", "compatible"] as const) {
       expect(render('<x-embed video="1" />', syntax)).toBe('<x-embed video="1"></x-embed>');
       expect(render('<script src="app.js" />', syntax)).toBe('<script src="app.js"></script>');
     }
@@ -167,7 +196,7 @@ describe("self-closing elements", () => {
   });
   it("reads the self-closing flag as HTML's tokenizer does", () => {
     const source = "<a href=https://www.infoq.com/articles/Transition-RDBMS-NoSQL/>Source</a>";
-    for (const syntax of ["modern", "compatible"] as const) expect(render(source, syntax)).toContain('<a href="https://www.infoq.com/articles/Transition-RDBMS-NoSQL/">Source</a>');
+    for (const syntax of ["standard", "compatible"] as const) expect(render(source, syntax)).toContain('<a href="https://www.infoq.com/articles/Transition-RDBMS-NoSQL/">Source</a>');
   });
   it("writes the authored /> back", () => {
     for (const source of ['<x-embed video="1" />', "<div><x-a /><p>b</p></div>"]) roundTrips(source);
@@ -189,7 +218,7 @@ describe("stray end tags", () => {
     const excalidraw = '<h2 align="center">\n  An open source virtual hand-drawn style whiteboard. </br>\n  Collaborative and end-to-end encrypted. </br>\n<br />\n</h2>';
     expect(render(excalidraw)).toBe('<h2 align="center">An open source virtual hand-drawn style whiteboard. <br />\nCollaborative and end-to-end encrypted. <br /><br /></h2>');
     expect(render(excalidraw, "compatible")).toContain("whiteboard. <br />");
-    expect(codes("line one</br>\nline two", "modern", { lint: true })).toEqual(["br-end-tag"]);
+    expect(codes("line one</br>\nline two", "standard", { lint: true })).toEqual(["br-end-tag"]);
     expect(codes("line one</br>\nline two", "compatible", { lint: true })).toEqual(["br-end-tag"]);
     expect(codes("line one</br>\nline two")).toEqual([]);
     roundTrips(excalidraw);
@@ -199,18 +228,18 @@ describe("stray end tags", () => {
 describe("the safe profile", () => {
   it("shows a disallowed element as text, with a diagnostic", () => {
     const seen: string[] = [];
-    expect(normalize(renderHtml(parse('<input type="checkbox">', { syntax: "modern", onDiagnostic: diagnostic => seen.push(diagnostic.code) })))).toBe('&lt;input type="checkbox"&gt;');
+    expect(normalize(renderHtml(parse('<input type="checkbox">', { syntax: "standard", onDiagnostic: diagnostic => seen.push(diagnostic.code) })))).toBe('&lt;input type="checkbox"&gt;');
     expect(seen).toContain("html-element-escaped");
     seen.length = 0;
-    expect(normalize(renderHtml(parse('<input type="checkbox">', { syntax: "modern", trustedHtml: true }), { onDiagnostic: diagnostic => seen.push(diagnostic.code) }))).toBe('&lt;input type="checkbox"&gt;');
+    expect(normalize(renderHtml(parse('<input type="checkbox">', { syntax: "standard", trustedHtml: true }), { onDiagnostic: diagnostic => seen.push(diagnostic.code) }))).toBe('&lt;input type="checkbox"&gt;');
     expect(seen).toContain("html-element-escaped");
     expect(normalize(renderHtml(parse('<input type="checkbox">', { trustedHtml: true })))).toBe('&lt;input type="checkbox"&gt;');
-    expect(normalize(renderHtml(parse("Run <script>x()</script> now", { syntax: "modern", trustedHtml: true })))).toBe("<p>Run &lt;script&gt;x()&lt;/script&gt; now</p>");
+    expect(normalize(renderHtml(parse("Run <script>x()</script> now", { syntax: "standard", trustedHtml: true })))).toBe("<p>Run &lt;script&gt;x()&lt;/script&gt; now</p>");
   });
 });
 
 describe("indented code", () => {
-  it("reads indentation as no code in modern syntax", () => {
+  it("reads indentation as no code in standard syntax", () => {
     expect(render("    const x = 1;")).toBe("<p>const x = 1;</p>");
     expect(render("    # Title")).toBe("<h1>Title</h1>");
     expect(render("- item\n\n      more")).toBe("<ul><li><p>item</p><p>more</p></li></ul>");
@@ -221,7 +250,7 @@ describe("indented code", () => {
 });
 
 describe("headings", () => {
-  it("reads --- under a paragraph as a thematic break and === as text in modern syntax", () => {
+  it("reads --- under a paragraph as a thematic break and === as text in standard syntax", () => {
     expect(render("Title\n---")).toBe("<p>Title</p><hr />");
     expect(render("Title\n===")).toBe("<p>Title\n===</p>");
   });
@@ -231,7 +260,7 @@ describe("headings", () => {
 });
 
 describe("hard breaks", () => {
-  it("ignores trailing spaces and breaks at a backslash in modern syntax", () => {
+  it("ignores trailing spaces and breaks at a backslash in standard syntax", () => {
     expect(render("one  \ntwo")).toBe("<p>one\ntwo</p>");
     expect(render("one\\\ntwo")).toBe("<p>one<br />two</p>");
   });
@@ -242,7 +271,7 @@ describe("hard breaks", () => {
 
 describe("code spans in table cells", () => {
   const table = "| Expression | Reads |\n| --- | --- |\n| `a || b` | or |";
-  it("keeps a code span's pipes in its cell in modern syntax", () => {
+  it("keeps a code span's pipes in its cell in standard syntax", () => {
     expect(render(table)).toBe("<table><tr><th>Expression</th><th>Reads</th></tr><tr><td><code>a || b</code></td><td>or</td></tr></table>");
     expect(render("| a | b |\n| --- | --- |\n| x \\| y | z |")).toContain("<td>x | y</td>");
     roundTrips(table);
@@ -253,7 +282,7 @@ describe("code spans in table cells", () => {
 });
 
 describe("lazy continuation", () => {
-  it("ends a quote or list at a line without its marker or indentation in modern syntax", () => {
+  it("ends a quote or list at a line without its marker or indentation in standard syntax", () => {
     expect(render("> quoted\nnot quoted")).toBe("<blockquote><p>quoted</p></blockquote><p>not quoted</p>");
     expect(render("- item\nnot item")).toBe("<ul><li>item</li></ul><p>not item</p>");
   });
@@ -263,7 +292,7 @@ describe("lazy continuation", () => {
 });
 
 describe("list markers", () => {
-  it("continues a list when the bullet or delimiter changes in modern syntax", () => {
+  it("continues a list when the bullet or delimiter changes in standard syntax", () => {
     expect(render("- a\n* b\n+ c")).toBe("<ul><li>a</li><li>b</li><li>c</li></ul>");
     expect(render("1. a\n2) b")).toBe("<ol><li>a</li><li>b</li></ol>");
     roundTrips("- a\n* b\n+ c");
@@ -274,7 +303,7 @@ describe("list markers", () => {
 });
 
 describe("link targets", () => {
-  it("reads spaces in a target that ends at its balancing parenthesis in modern syntax", () => {
+  it("reads spaces in a target that ends at its balancing parenthesis in standard syntax", () => {
     expect(render("[a](my file.md)")).toBe('<p><a href="my%20file.md">a</a></p>');
     expect(render('[a](my file.md "Title")')).toBe('<p><a href="my%20file.md" title="Title">a</a></p>');
     expect(render("[a](notes (draft).md) and [b](c.md)")).toBe('<p><a href="notes%20(draft).md">a</a> and <a href="c.md">b</a></p>');
@@ -287,7 +316,7 @@ describe("link targets", () => {
 });
 
 describe("list nesting", () => {
-  it("nests a line indented past its item's marker in modern syntax", () => {
+  it("nests a line indented past its item's marker in standard syntax", () => {
     expect(render("- a\n - b")).toBe("<ul><li>a<ul><li>b</li></ul></li></ul>");
     expect(render("- a\n\t- b")).toBe("<ul><li>a<ul><li>b</li></ul></li></ul>");
     expect(render("- a\n  - b\n- c")).toBe("<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>");
@@ -301,7 +330,7 @@ describe("list nesting", () => {
 });
 
 describe("blank lines in lists", () => {
-  it("splits a list at a blank line between items in modern syntax", () => {
+  it("splits a list at a blank line between items in standard syntax", () => {
     expect(render("- a\n- b\n\n- c")).toBe("<ul><li>a</li><li>b</li></ul><ul><li>c</li></ul>");
     expect(render("- a\n\n  more\n- b")).toBe("<ul><li><p>a</p><p>more</p></li><li>b</li></ul>");
     expect(render("1. a\n2. b\n\n3. c")).toBe('<ol><li>a</li><li>b</li></ol><ol start="3"><li>c</li></ol>');
@@ -314,13 +343,13 @@ describe("blank lines in lists", () => {
 
 describe("list tables", () => {
   it("keeps rows separated by blank lines in one table in both syntaxes", () => {
-    for (const syntax of ["modern", "compatible"] as const) expect(render("::: table\n- Name: Ada\n  Role: Math\n\n- Name: Alan\n  Role: Logic\n:::", syntax)).toBe("<table><tr><th>Name</th><th>Role</th></tr><tr><td>Ada</td><td>Math</td></tr><tr><td>Alan</td><td>Logic</td></tr></table>");
+    for (const syntax of ["standard", "compatible"] as const) expect(render("::: table\n- Name: Ada\n  Role: Math\n\n- Name: Alan\n  Role: Logic\n:::", syntax)).toBe("<table><tr><th>Name</th><th>Role</th></tr><tr><td>Ada</td><td>Math</td></tr><tr><td>Alan</td><td>Logic</td></tr></table>");
   });
 });
 
 describe("duplicate link definitions", () => {
   const source = "[x]\n\n[x]: /one\n[x]: /two";
-  it("uses the last definition in modern syntax and the first in compatible syntax", () => {
+  it("uses the last definition in standard syntax and the first in compatible syntax", () => {
     expect(render(source)).toBe('<p><a href="/two">x</a></p>');
     expect(render(source, "compatible")).toBe('<p><a href="/one">x</a></p>');
   });
@@ -330,7 +359,7 @@ describe("duplicate link definitions", () => {
   });
 });
 
-// The spec's examples, verbatim, in `modern` syntax.
+// The spec's examples, verbatim, in `standard` syntax.
 describe("spec examples", () => {
   it.each([
     ['<div class="entry">\nSome **bold** text.\n</div>', '<div class="entry">Some <strong>bold</strong> text.</div>'],
@@ -354,10 +383,10 @@ describe("spec examples", () => {
     ["Run <script>if (a **b** c) `x`</script> now.", "<p>Run <script>if (a **b** c) `x`</script> now.</p>"],
   ])("%s", (source, html) => expect(render(source)).toBe(html));
   it("continues a footnote on lines indented past its marker", () => {
-    expect(parse("[^a]: First.\n\n  Second.\nAfter.", { syntax: "modern" }).body.map(node => node.type === "footnoteDefinition" ? node.body?.map(child => child.value) : node.value)).toEqual([["First.", "Second."], "After."]);
+    expect(parse("[^a]: First.\n\n  Second.\nAfter.", { syntax: "standard" }).body.map(node => node.type === "footnoteDefinition" ? node.body?.map(child => child.value) : node.value)).toEqual([["First.", "Second."], "After."]);
   });
   it("reads <u> and <mark> as element nodes", () => {
-    expect(parse("<u>Underlined</u> and <mark>highlighted</mark> text.", { syntax: "modern" }).body[0]).toEqual({ type: "paragraph", children: [
+    expect(parse("<u>Underlined</u> and <mark>highlighted</mark> text.", { syntax: "standard" }).body[0]).toEqual({ type: "paragraph", children: [
       { type: "htmlElement", display: "inline", tag: "u", open: "<u>", close: "</u>", value: "Underlined" },
       { type: "text", value: " and " },
       { type: "htmlElement", display: "inline", tag: "mark", open: "<mark>", close: "</mark>", value: "highlighted" },

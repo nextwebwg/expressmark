@@ -42,9 +42,9 @@ export function referenceOrder(document: Document, notes: ReadonlyMap<string, No
   return order;
 }
 
-/** Link reference definitions by normalized label: the last wins in `modern` syntax, the first in `compatible`. */
+/** Link reference definitions by normalized label: the last wins in `standard` syntax, the first in `compatible`. */
 export function linkDefinitions(document: Document | Node): Map<string, Node> {
-  const last = (document as Document).syntax === "modern";
+  const last = (document as Document).syntax !== "compatible";
   const definitions = new Map<string, Node>();
   walk(document, node => {
     if (node.type !== "definition" || typeof node.label !== "string") return;

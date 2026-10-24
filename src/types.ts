@@ -50,11 +50,14 @@ export interface Document extends Node {
   body: Node[];
   title?: Node;
   metadata?: { [key: string]: Json };
-  /** The syntax that read the document, when it is `modern` or set by its frontmatter. */
+  /** The non-default or frontmatter syntax. An absent value means `standard`. */
   syntax?: Syntax;
 }
-/** `compatible` reads CommonMark 0.31.2 and GFM with the extensions; `modern` reads the Expressive Markdown spec. */
-export type Syntax = "compatible" | "modern";
+/** `compatible` reads CommonMark 0.31.2 and GFM with the extensions; `standard` reads the Expressive Markdown spec. */
+export type Syntax = "compatible" | "standard";
+export function validateSyntax(syntax: unknown): void {
+  if(syntax !== undefined && syntax !== "compatible" && syntax !== "standard") throw new TypeError("Syntax must be compatible or standard.");
+}
 export interface Diagnostic {
   code: string;
   message: string;
@@ -75,7 +78,7 @@ export interface ConversionOptions {
    * `renderHtml` still applies its profile and the host's allowlist.
    */
   trustedHtml?: boolean;
-  /** The syntax for documents whose frontmatter sets none. Default `compatible`. */
+  /** The syntax for documents whose frontmatter sets none. Default `standard`. */
   syntax?: Syntax;
   /** `parse`: report spellings other than the preferred form, as lint warnings. */
   lint?: LintOption;

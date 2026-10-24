@@ -1,5 +1,5 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { expect, it } from "vitest";
-import { parse, stringify } from "../src/index.js";
 
 it.each(["a@word", "a@[Ada]", "(@word)", "!@[Ada]", "日@word", "/@word"])("requires whitespace or a line start before mentions: %s", source => {
   expect(parse(source).body).toEqual([{type:"paragraph",value:source}]);
@@ -49,7 +49,7 @@ it("keeps ordinary formatting and other directives beside the removed mention fo
 
 it("parses authored identities, metadata, inline structure and mention references", () => {
   const document = parse('---\nid: guide\ntitle: "Deploy **safely**"\ncustom: {enabled: true}\n---\n## Deploy {#deploy}\n\nThanks, @[Ada Lovelace]#user-123{#thanks}.');
-  expect(document).toMatchObject({type:"document",version:1,id:"guide",metadata:{custom:{enabled:true}},body:[{type:"heading",level:2,id:"deploy",value:"Deploy"},{type:"paragraph",children:[{type:"text",value:"Thanks, "},{type:"inline",subType:"mention",value:"Ada Lovelace",ref:"user-123",id:"thanks"},{type:"text",value:"."}]}]});
+  expect(document).toMatchObject({type:"document",version:1,syntax:"compatible",id:"guide",metadata:{custom:{enabled:true}},body:[{type:"heading",level:2,id:"deploy",value:"Deploy"},{type:"paragraph",children:[{type:"text",value:"Thanks, "},{type:"inline",subType:"mention",value:"Ada Lovelace",ref:"user-123",id:"thanks"},{type:"text",value:"."}]}]});
   expect(parse(stringify(document))).toEqual(document);
 });
 
@@ -67,7 +67,7 @@ it("drops unsafe HTML and its script contents, keeping literal code", () => {
   expect(output).not.toContain('onclick');
   expect(output).toContain('`<script>literal</script>`');
   expect(diagnostics.length).toBeGreaterThan(0);
-  expect(stringify({type:"document",version:1,body:[{type:"html",display:"block",value:'<script>secret()</script><p onclick="x()">Safe</p>'}]})).not.toMatch(/secret|onclick/);
+  expect(stringify({type:"document",version:1,syntax:"compatible",body:[{type:"html",display:"block",value:'<script>secret()</script><p onclick="x()">Safe</p>'}]})).not.toMatch(/secret|onclick/);
 });
 
 it("round-trips ordinary Markdown, tasks, nested containers and explicit tab settings", () => {
@@ -95,8 +95,8 @@ it("keeps authored strings, resolves normalized duplicate attributes last, and p
 });
 
 it("rejects lossy supplied ASTs instead of choosing or dropping content", () => {
-  expect(()=>stringify({type:"document",version:1,body:[{type:"unknown",value:"data"}]})).toThrow(/block nodes/);
-  expect(()=>stringify({type:"document",version:1,body:[{type:"paragraph",value:"a",children:[]}]})).toThrow(/cannot combine/);
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"unknown",value:"data"}]})).toThrow(/block nodes/);
+  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",value:"a",children:[]}]})).toThrow(/cannot combine/);
   expect(()=>stringify({type:"document",version:2,body:[]} as never)).toThrow(/version 1/);
 });
 
@@ -127,7 +127,7 @@ it("preserves malformed regions as literal recovery and reports invalid YAML", (
 });
 
 it("preserves rich-cell custom attributes and authored flag values in safe native fallback", () => {
-  const document={type:"document",version:1,body:[{type:"table",align:["start","end"],children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",colSpan:2,attributes:{columnWidths:"100,120",textAlign:"center",backgroundColor:"#ffeeaa",responsive:false},body:[{type:"paragraph",value:"Rich"},{type:"paragraph",value:"body"}]}]}]}]} as const;
+  const document={type:"document",version:1,syntax:"compatible",body:[{type:"table",align:["start","end"],children:[{type:"tableRow",children:[{type:"tableCell",header:true,value:"A"},{type:"tableCell",header:true,value:"B"}]},{type:"tableRow",children:[{type:"tableCell",colSpan:2,attributes:{columnWidths:"100,120",textAlign:"center",backgroundColor:"#ffeeaa",responsive:false},body:[{type:"paragraph",value:"Rich"},{type:"paragraph",value:"body"}]}]}]}]} as const;
   const parsed=parse(stringify(document as never));
   expect(parsed).toEqual(document);
 });
@@ -149,5 +149,5 @@ it("reports inline attachment diagnostics once when reusing parsed tokens", () =
 
 
 it.each(["left", "right"])("rejects physical table alignment in AST input: %s", alignment => {
-  expect(() => stringify({type:"document",version:1,body:[{type:"table",align:[alignment],children:[]}]} as never)).toThrow(/alignment/);
+  expect(() => stringify({type:"document",version:1,syntax:"compatible",body:[{type:"table",align:[alignment],children:[]}]} as never)).toThrow(/alignment/);
 });

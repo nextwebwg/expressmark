@@ -393,7 +393,7 @@ export function safeAuthoredAttributes(input: Record<string,unknown>, options: C
   return result;
 }
 
-// Modern-mode elements, matched as HTML matches tags. Void elements take no
+// Standard-mode elements, matched as HTML matches tags. Void elements take no
 // closing tag; the raw-text elements hold their content verbatim through their
 // end; and HTML's optional end tags close an element where HTML closes it.
 export const voidElements = new Set(["area","base","br","col","embed","hr","img","input","link","meta","source","track","wbr"]);
