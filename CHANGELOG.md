@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.3
+## 0.3.0
 
 - Read Markdown with Parseman. Grammars in `src/markdown/lexicon.ts` recognize
   each block start and inline construct, and the reader in `src/markdown` applies
