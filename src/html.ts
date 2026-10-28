@@ -59,7 +59,8 @@ export interface HtmlAllowlist {
   tags?: readonly string[];
   /**
    * Extra attributes per element name, or `"*"` for every element. Names are
-   * exact or end in `-*` for a prefix. An event-handler name such as `onclick`
+   * exact (including `$`-prefixed host attributes) or end in `-*` for a prefix.
+   * Dollar-prefixed names must be exact. An event-handler name such as `onclick`
    * must be listed exactly: it runs script, so it grants the content script access.
    */
   attributes?: Readonly<Record<string, readonly string[]>>;
@@ -75,8 +76,9 @@ function allowlistPolicy(allowlist: HtmlAllowlist): sanitize.IOptions {
   const attributes: Record<string, string[]> = { ...(policy.allowedAttributes as Record<string, string[]>) };
   for (const [tag, names] of Object.entries(allowlist.attributes ?? {})) {
     for (const name of names) {
-      // A wildcard could admit event handlers, so only a named prefix may end in *.
-      if (!/^[a-zA-Z][\w:.-]*(?:-\*)?$/.test(name)) throw new TypeError(`Unsupported allowlisted attribute ${name}; use an exact name or a prefix ending in -*.`);
+      // Host directives accept exact $ names; only an ordinary named prefix may end in *.
+      // Broader wildcards could admit event handlers without naming them explicitly.
+      if (!/^(?:[a-zA-Z][\w:.-]*(?:-\*)?|\$[a-zA-Z][\w:.-]*)$/.test(name)) throw new TypeError(`Unsupported allowlisted attribute ${name}; use an exact name or a prefix ending in -*.`);
     }
     attributes[tag] = [...(attributes[tag] ?? []), ...names];
   }

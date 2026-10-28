@@ -42,6 +42,14 @@ describe("trusted host HTML", () => {
     expect(renderHtml(document,{trustedHtml:allow})).toBe('<p>Text <demo-card tone="calm"><strong>bold</strong></demo-card>.</p><p><button>Copy</button> <input type="checkbox" checked disabled /></p><p><span style="color:light-dark(#111, #eee);--shiki-dark:#abc">x</span></p>');
     expect(renderHtml(parse('<template component="x">\n<p>Inside</p>\n</template>',{trustedHtml:true}),{trustedHtml:allow})).toBe('<template component="x">\n<p>Inside</p>\n</template>');
   });
+  it.each(["standard", "compatible"] as const)("keeps exact dollar-prefixed host attributes in %s HTML", syntax => {
+    for (const [attribute, value] of [['$if="$visible"', "Shown"], ["$else", "Hidden"], ['$for="item of items"', "{item}"]]) {
+      const document = parse(`<p ${attribute} onclick="run()">${value}</p>`, {syntax, trustedHtml:true});
+      expect(renderHtml(document,{trustedHtml:{attributes:{p:["$if","$else","$for"]}}}))
+        .toBe(`<p ${attribute}>${value}</p>`);
+      expect(renderHtml(document)).toBe(`<p>${value}</p>`);
+    }
+  });
   it("applies the allowlist to transformer output too", () => {
     expect(renderHtml(parse("Done"),{trustedHtml:{tags:["ui-check"]},transformers:{paragraph:() => '<ui-check onclick="x()">ok</ui-check><blink>no</blink>'}})).toBe("<ui-check>ok</ui-check>no");
   });
@@ -60,7 +68,7 @@ describe("trusted host HTML cannot be bypassed through attributes", () => {
     expect(renderHtml(parse(html,{trustedHtml:true}),{trustedHtml:allow})).toBe(expected);
   });
   it("rejects wildcard attribute entries that could admit event handlers", () => {
-    for (const name of ["*","on*","o*","*click"]) expect(() => renderHtml(parse("x"),{trustedHtml:{attributes:{"*":[name]}}})).toThrow(TypeError);
+    for (const name of ["*","on*","o*","*click","$*","$if*","$if-*","$"]) expect(() => renderHtml(parse("x"),{trustedHtml:{attributes:{"*":[name]}}})).toThrow(TypeError);
   });
   it("admits a handler or script scheme only when named exactly", () => {
     const html = '<button onclick="run()">Go</button> <a href="javascript:run()">Run</a>';

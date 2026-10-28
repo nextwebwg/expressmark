@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Keep explicitly allowlisted dollar-prefixed host attributes such as `$if`,
+  `$else` and `$for` when rendering trusted HTML in both syntaxes. Broad
+  attribute wildcards remain rejected, and unlisted event handlers stay filtered.
+
 ## 0.2.0
 
 - Rename the explicit Expressive Markdown syntax from `modern` to `standard` in
