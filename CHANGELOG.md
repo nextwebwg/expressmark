@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Keep a code span beginning a named table field inline when it contains literal
+  backticks. It no longer opens a block fence that swallows the table's closing
+  line and following content, so literal HTML in code survives preferred writing.
+
 ## 0.2.0
 
 - Rename the explicit Expressive Markdown syntax from `modern` to `standard` in
