@@ -1,43 +1,43 @@
 # Recorded measurements
 
-## Parseman reader against markdown-it, 0.1.19
+## Parseman reader against markdown-it, 0.3.0
 
-Measured on 2026-10-23 with Node 24.11.1 on an Apple M4 Pro (macOS arm64) by
-`compare.mjs`: base `204fc28` (0.1.18, markdown-it 15.0.3) against candidate
-`f1e44cb` (0.1.19, Parseman 0.55.3), 21 interleaved rounds per input set and
+Measured on 2026-10-28 with Node 24.11.1 on an Apple M4 Pro (macOS arm64) by
+`compare.mjs`: base `1ecaae0` (0.2.2, markdown-it 15.0.3) against candidate
+`8b02b1a` (0.3.0, Parseman 0.55.3), 21 interleaved rounds per input set and
 syntax, each run at least 200 ms after a 500 ms warmup. Other sessions kept the
-one-minute load average at 10–11 throughout; base and candidate alternate in
+one-minute load average at 11–14 throughout; base and candidate alternate in
 one process, so both see the same load. Every parsed document is identical
 between the two builds.
 
 | Input set | Syntax | Documents | markdown-it ms | Parseman ms | Ratio (round range) | Retained MB, base → candidate | Peak MB, base → candidate |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| fixtures | compatible | 5 | 21.60 | 18.47 | 0.855× (0.262–1.691) | 3.92 → 1.88 | 11.95 → 19.00 |
-| fixtures | modern | 5 | 21.24 | 17.78 | 0.837× (0.738–1.239) | 1.87 → 1.87 | 36.77 → 17.64 |
-| CommonMark 0.31.2 | compatible | 652 | 16.48 | 6.68 | 0.405× (0.369–0.438) | 0.73 → 0.68 | 32.86 → 19.59 |
-| CommonMark 0.31.2 | modern | 652 | 17.81 | 7.55 | 0.424× (0.397–0.457) | 0.75 → 0.84 | 32.59 → 21.51 |
-| GFM 0.29 | compatible | 672 | 19.36 | 7.98 | 0.412× (0.376–0.436) | 0.80 → 0.80 | 32.97 → 21.12 |
-| GFM 0.29 | modern | 672 | 20.76 | 8.48 | 0.409× (0.391–0.476) | 0.81 → 0.81 | 33.15 → 22.45 |
-| READMEs | compatible | 398 | 994.11 | 791.99 | 0.797× (0.750–0.836) | 56.33 → 56.26 | 147.75 → 157.84 |
-| READMEs | modern | 398 | 1702.33 | 917.59 | 0.539× (0.478–0.577) | 61.11 → 61.12 | 182.58 → 215.19 |
+| fixtures | compatible | 5 | 22.27 | 19.06 | 0.856× (0.582–1.470) | 1.88 → 1.88 | 37.69 → 19.45 |
+| fixtures | standard | 5 | 20.45 | 17.07 | 0.835× (0.755–0.897) | 2.23 → 2.10 | 36.35 → 17.13 |
+| CommonMark 0.31.2 | compatible | 652 | 16.22 | 6.72 | 0.415× (0.328–0.480) | 0.73 → 0.70 | 32.82 → 19.69 |
+| CommonMark 0.31.2 | standard | 652 | 17.85 | 7.67 | 0.430× (0.410–0.510) | 0.75 → 0.75 | 32.59 → 21.55 |
+| GFM 0.29 | compatible | 672 | 18.53 | 7.33 | 0.395× (0.363–0.435) | 1.19 → 0.80 | 24.90 → 21.09 |
+| GFM 0.29 | standard | 672 | 22.26 | 10.23 | 0.460× (0.327–0.618) | 0.65 → 1.17 | 17.04 → 22.35 |
+| READMEs | compatible | 398 | 1044.16 | 820.32 | 0.786× (0.717–0.901) | 56.33 → 56.27 | 145.34 → 157.58 |
+| READMEs | standard | 398 | 1758.02 | 984.29 | 0.560× (0.493–0.683) | 60.91 → 60.88 | 141.75 → 204.88 |
 
 Milliseconds are the median time to parse every document of the set once. The
-retained heap is what one pass's documents keep alive; peak is the highest heap
-a pass reaches above a collected baseline, sampled after each document, and it
-moves with collector timing, so it is indicative only. Retained heap moves by up
-to 0.4 MB between two runs of one build on the small sets.
+retained heap is what one pass's documents keep alive; it moves by up to 0.5 MB
+between runs of one build on the small sets. Peak is the highest heap a pass
+reaches above a collected baseline, sampled after each document; it follows the
+collector's timing and is indicative only.
 
-An A/A control, base against itself at a load average of 2, read ratios of
+An A/A control, 0.1.18 against itself at a load average of 2, read ratios of
 0.975–1.017 on every set (round ratios 0.923–1.064): differences inside that
 band are noise.
 
 The small sets gain most from readers built once per rule set, with the link
-detector compiled once. The README corpus in `modern` syntax also gains from
+detector compiled once. The README corpus in `standard` syntax also gains from
 reading an HTML element's code spans in time linear in the element. Recording
 the source for exact writing costs about 9% of README parse time in both builds.
 
-Cold start (import and a first one-line parse, median of seven processes):
-58.9 ms and 5.9 ms for the base, 57.4 ms and 6.1 ms for the candidate.
+Cold start (import and a first one-line parse, median of seven processes, on
+0.1.18 against this reader): 58.9 ms and 5.9 ms against 57.4 ms and 6.1 ms.
 Shipped JavaScript: `dist` is 363 KB (86 KB gzip) against 269 KB (65 KB gzip),
 and markdown-it's 119 KB (28 KB gzip) module leaves the dependency tree.
 

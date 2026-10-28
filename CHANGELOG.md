@@ -2,7 +2,8 @@
 
 ## 0.3.0
 
-- Read Markdown with Parseman. Grammars in `src/markdown/lexicon.ts` recognize
+- Read Markdown with Parseman. The API, the AST and every output are those of
+  0.2.2. Grammars in `src/markdown/lexicon.ts` recognize
   each block start and inline construct, and the reader in `src/markdown` applies
   CommonMark's container, link and emphasis algorithms to what they recognize,
   following markdown-it 15.0.3's behavior exactly. Every document of the
@@ -10,8 +11,8 @@
   and writes canonically as 0.2.2 does, in both syntaxes and both HTML profiles.
   The dependencies are Parseman 0.55.3, entities, linkify-it, mdurl, punycode.js
   and uc.micro.
-- Parse in 0.80× of 0.2.2's time on the README corpus in `compatible` syntax,
-  0.54× in `standard`, and about 0.41× on the CommonMark and GFM examples, whose
+- Parse in 0.79× of 0.2.2's time on the README corpus in `compatible` syntax,
+  0.56× in `standard`, and 0.40–0.46× on the CommonMark and GFM examples, whose
   short documents gain most from readers built once per rule set. See
   [the measurements](benchmarks/results/README.md).
 - Read a document's pipe tables and HTML elements in time linear in its length.
