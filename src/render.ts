@@ -1,3 +1,4 @@
+import { Parser } from "htmlparser2";
 import { headingAnchors } from "./anchors.js";
 import { allowedElement, escapeHtml, normalizeTags, rawTextElements, readStartTag, sanitizeHtml, voidElements, type HtmlAllowlist } from "./html.js";
 import { footnoteDefinitions, linkDefinitions, references, referenceOrder } from "./references.js";
@@ -68,6 +69,21 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
     const escaped = escapeHtml(value);
     // oxlint-disable-next-line no-control-regex -- authored text cannot forge a marker.
     return hook ? `${TEXT_START}${escaped.replace(/[\u0002\u0003]/g, "")}${TEXT_END}` : escaped;
+  }
+  function codeHtml(value: string): string {
+    if (!hook) return value;
+    // Native code can contain highlighting tags and entities. Mark only HTML
+    // text for the post-profile hook, leaving markup and attributes untouched.
+    const source = value.replaceAll(TEXT_START, "").replaceAll(TEXT_END, "");
+    const parts: string[] = [];
+    let copied = 0;
+    const parser = new Parser({ ontext() {
+      parts.push(source.slice(copied, parser.startIndex), TEXT_START, source.slice(parser.startIndex, parser.endIndex + 1), TEXT_END);
+      copied = parser.endIndex + 1;
+    } }, { decodeEntities: false });
+    parser.end(source);
+    parts.push(source.slice(copied));
+    return parts.join("");
   }
   const transformers = options.transformers ?? {};
   let inheritedAlignment: LayoutAlignment | undefined;
@@ -216,7 +232,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
         const start = node.open ?? "";
         const open = start.startsWith("</") ? `<${tag}>` : !empty && readStartTag(start, 0)?.selfClosing ? start.slice(0, -2).trimEnd() + ">" : start;
         const close = empty ? "" : node.close ?? `</${tag}>`;
-        const inner = node.value !== undefined ? rawTextElements.has(tag) && allowed(tag) ? node.value : text(node.value) : node.children ? content(node) : node.tight === false ? content(node) : unwrapped(node, true);
+        const inner = node.value !== undefined ? rawTextElements.has(tag) && allowed(tag) ? tag === "code" || tag === "pre" ? codeHtml(node.value) : node.value : text(node.value) : node.children ? content(node) : node.tight === false ? content(node) : unwrapped(node, true);
         if (!allowed(tag)) { shownElement(tag); return `${text(node.open ?? "")}${inner}${node.close ? text(node.close) : ""}`; }
         return `${open}${inner}${close}`;
       }
