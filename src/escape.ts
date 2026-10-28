@@ -1,5 +1,5 @@
-import MarkdownIt, { type StateInline } from "markdown-it";
-import { configureAutolinks } from "./autolinks.js";
+import { Engine, type StateInline } from "./markdown/engine.js";
+import { autolinks } from "./autolinks.js";
 import { mentionBoundary, normalizeLabel, readAttributes, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import type { Node } from "./types.js";
 
@@ -45,7 +45,7 @@ function literalGrammarSource(value: string): string {
 // Balance literal delimiter runs with the same flanking and pairing rules as
 // the reader. Other syntax is disabled: code/link/HTML-shaped literal text must
 // not hide punctuation that becomes active once its opener is escaped.
-const delimiters=new MarkdownIt("zero");
+const delimiters=new Engine("zero");
 delimiters.inline.ruler.before("text","literal_delimiters",(state,silent)=> {
   const marker=state.src.charCodeAt(state.pos);
   if(silent || ![42,95,126].includes(marker)) return false;
@@ -75,8 +75,7 @@ delimiters.inline.ruler2.before("fragments_join","literal_pairs",state=> {
   }
 });
 
-export const syntax=new MarkdownIt("zero",{html:true}).enable(["link","image","autolink","html_inline"]);
-configureAutolinks(syntax);
+export const syntax=new Engine("zero",{html:true},autolinks).enable(["link","image","autolink","html_inline"]);
 const syntaxRules=syntax.inline.ruler.getRules("");
 function opensInlineSyntax(state: StateInline, offset: number): boolean {
   state.pos=offset;

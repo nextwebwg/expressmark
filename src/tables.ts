@@ -1,4 +1,4 @@
-import type { MarkdownIt, Token } from "markdown-it";
+import type { Token } from "./markdown/engine.js";
 import type { Node } from "./types.js";
 import { ConversionError } from "./types.js";
 
@@ -79,11 +79,11 @@ function namedFields(source: string): Map<string,string> {
 }
 
 /** Consume source controls once; cell bodies use the same Markdown parser as the document. */
-export function readListTable(container: Node, source: string, md: MarkdownIt, parseBlocks: (source: string)=>Node[]): Node | string {
+export function readListTable(container: Node, source: string, read: (source: string)=>Token[], parseBlocks: (source: string)=>Node[]): Node | string {
   try {
     const attributes={...container.attributes};
     for(const key of ["header","transpose"]) if(attributes[key] !== undefined && typeof attributes[key] !== "boolean") invalid(`${key} must be a boolean flag.`);
-    const root=blockTree(md.parse(source,{}));
+    const root=blockTree(read(source));
     const rows: Node[]=[];
     const markers: string[][]=[];
     const names: string[]=[];
@@ -110,7 +110,7 @@ export function readListTable(container: Node, source: string, md: MarkdownIt, p
           rows.push({type:"tableRow",children:names.map(name=>cell(values.get(name) ?? ""))});
           markers.push(names.map(()=>""));
         } else {
-          const tree=blockTree(md.parse(value,{}));
+          const tree=blockTree(read(value));
           if(tree.length !== 1 || tree[0]!.token.type !== "bullet_list_open") invalid("A positional row must contain exactly one unordered cell list.");
           const values=tree[0]!.children.map(item=>itemSource(value,item));
           if(named && values.length>names.length) invalid("A positional row exceeds the established named columns.");
