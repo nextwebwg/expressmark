@@ -1,5 +1,51 @@
 # Recorded measurements
 
+## Line runs, bare URLs and incremental parsing, 0.4.0
+
+Measured on 2026-10-28 with Node 24.11.1 on an Apple M4 Pro (macOS arm64) by
+`compare.mjs`: base `ac43594` (0.3.0, Parseman 0.55.3) against candidate
+`378ebaa` (0.4.0, Parseman 0.56.0), 21 rounds per input set and syntax. Each
+round runs one child process per checkout, base then candidate, each timing
+whole passes for at least 200 ms after a 500 ms warmup. The one-minute load
+average was 4.9–7.6 from other sessions. Every parsed document is identical
+between the two builds, comparing the five fields of each source block entry
+that both versions record.
+
+| Input set | Syntax | Documents | 0.3.0 ms | 0.4.0 ms | Ratio (round range) | Retained MB, base → candidate | Peak MB, base → candidate |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| fixtures | compatible | 5 | 17.47 | 17.34 | 0.993× (0.931–1.133) | 1.88 → 1.93 | 18.51 → 49.94 |
+| fixtures | standard | 5 | 17.61 | 17.16 | 0.975× (0.585–1.027) | 1.87 → 1.91 | 62.91 → 48.58 |
+| CommonMark 0.31.2 | compatible | 652 | 7.02 | 7.47 | 1.064× (0.876–1.580) | 0.73 → 0.78 | 19.35 → 19.40 |
+| CommonMark 0.31.2 | standard | 652 | 7.89 | 8.55 | 1.083× (0.927–1.186) | 0.75 → 1.24 | 21.21 → 22.39 |
+| GFM 0.29 | compatible | 672 | 8.15 | 7.59 | 0.931× (0.762–1.044) | 0.80 → 0.85 | 20.62 → 20.64 |
+| GFM 0.29 | standard | 672 | 9.24 | 8.70 | 0.942× (0.874–1.042) | 0.81 → 1.16 | 21.93 → 23.07 |
+| READMEs | compatible | 397 | 819.55 | 832.44 | 1.016× (0.865–1.278) | 56.45 → 58.15 | 124.95 → 147.24 |
+| READMEs | standard | 397 | 972.37 | 1030.40 | 1.060× (0.959–1.547) | 60.62 → 62.64 | 142.46 → 175.17 |
+
+An earlier run of the same protocol on the same day, with the candidate one
+commit before (Parseman at the 0.56.0 release commit, linked locally), read
+0.891× and 1.016× on CommonMark, 0.885× and 0.930× on GFM, and 0.992× and
+1.030× on the README corpus: differences of a few percent on these sets move
+between runs at this load.
+
+Peak is now the median, over five passes in fixed shuffled document orders, of
+the highest heap a pass reaches above a collected baseline. Where the
+collector runs depends on the order of the documents: in seven orders the
+README corpus in `standard` syntax peaks at 126–176 MB with 0.2.2, 132–168 MB
+with 0.3.0 and 144–181 MB with 0.4.0. One pass over that corpus allocates
+1.68 GB in 0.4.0 and 1.62 GB in 0.3.0. A heap snapshot of a quarter of the
+corpus holds 44.07 MB of parsed documents with 0.3.0 and 44.47 MB with 0.4.0,
+the difference being each top-level list's recorded item ranges.
+
+`incremental.mjs` timed a one-character edit at nine positions in prose lines
+of the corpus's largest README (426,115 bytes, 4,161 lines), 21 rounds, full
+parse and edit alternating order per round:
+
+| Syntax | Full parse median ms (Q1–Q3) | Edit median ms (Q1–Q3) | Ratio | Round ratios |
+| --- | ---: | ---: | ---: | ---: |
+| compatible | 37.411 (36.507–39.387) | 0.936 (0.863–1.021) | 0.0250× | 0.0188–0.0352 |
+| standard | 39.385 (37.365–40.332) | 1.018 (0.883–1.158) | 0.0258× | 0.0186–0.0341 |
+
 ## Parseman reader against markdown-it, 0.3.0
 
 Measured on 2026-10-28 with Node 24.11.1 on an Apple M4 Pro (macOS arm64) by
