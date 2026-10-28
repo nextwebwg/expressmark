@@ -1,7 +1,7 @@
 import { Engine, type StateBlock, type StateInline, type Token } from "./markdown/engine.js";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { alertMarker, attach, compact, contentHash, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { alertMarker, attach, childHashes, compact, contentHash, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installStandard, standardRules, type StandardRule } from "./standard.js";
@@ -1185,7 +1185,15 @@ function recordSource(document: Document, text: string, positions: WeakMap<Node,
     if(code === 10 || code === 13) { ends.push(index); if(code === 13 && text.charCodeAt(index+1) === 10) index++; starts.push(index+1); }
   } else for(let index=text.indexOf("\n");index >= 0;index=text.indexOf("\n",index+1)) { ends.push(index); starts.push(index+1); }
   ends.push(text.length);
-  const hashes=document.body.map(hashOf);
+  // A list's items are hashed with it, each serialized once.
+  const listed=new Map<Node,string[]>();
+  const blockHashes=document.body.map(node=>{
+    if(node.type !== "list" || !itemLines.has(node) || keep && hashes.has(node)) return hashOf(node);
+    const {hash,children}=childHashes(node);
+    listed.set(node,children);
+    if(keep) { hashes.set(node,hash); node.children!.forEach((item,index)=>hashes.set(item,children[index]!)); }
+    return hash;
+  });
   // Where tags appear, which marks blocks holding HTML the safe profile may filter.
   const tags: number[]=[];
   for(const match of text.matchAll(/<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])|<!--|<\?|<![A-Za-z]/g)) tags.push(match.index);
@@ -1216,9 +1224,10 @@ function recordSource(document: Document, text: string, positions: WeakMap<Node,
     const node=document.body[group.at]!, items=group.count === 1 ? itemLines.get(node) : undefined;
     if(items && items.every(([first,last])=>last>first && last<=ends.length)) {
       const parts: (string | number)[]=[contentHash({...node,children:[]})];
-      node.children!.forEach((item,index)=>parts.push(hashOf(item),...offsets(items[index]![0],items[index]![1])));
-      blocks.push([group.count,hashes[group.at]!,from,to,html,parts]);
-    } else blocks.push([group.count,hashes.slice(group.at,group.at+group.count).join("+"),from,to,html]);
+      const each=listed.get(node);
+      node.children!.forEach((item,index)=>parts.push(each?.[index] ?? hashOf(item),...offsets(items[index]![0],items[index]![1])));
+      blocks.push([group.count,blockHashes[group.at]!,from,to,html,parts]);
+    } else blocks.push([group.count,blockHashes.slice(group.at,group.at+group.count).join("+"),from,to,html]);
   };
   for(const [index,node] of document.body.entries()) {
     const lines=range(node);
