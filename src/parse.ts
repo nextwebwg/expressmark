@@ -338,7 +338,10 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       const text=line(state,close);
       if(!code && literalRanges.has(close)) { close=literalRanges.get(close)!-1; continue; }
       const fieldValue=node.subType === "table" ? readTableField(text.replace(/^[-+*][ \t]+/,""))?.value:undefined;
-      const fieldCode=fieldValue === undefined ? undefined:/^(`{3,}|~{3,})/.exec(fieldValue);
+      const fieldCode=fieldValue === undefined ? undefined:/^(`{3,}|~{3,})(.*)$/.exec(fieldValue);
+      // A backtick fence cannot have backticks in its info string. In particular,
+      // a field starting with a code span must not hide the table's closing line.
+      if(fieldCode?.[1]?.[0] === "`" && fieldCode[2]!.includes("`")) continue;
       const fence=/^(`{3,}|~{3,})/.exec(text) ?? fieldCode;
       if(fence) {
         const value=fence[1]!;
