@@ -164,7 +164,8 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
   const tasks=new WeakMap<Node,RegExpExecArray>();
   // A top-level list's items' source lines, for writing an edited list back item by item.
   const itemLines=new WeakMap<Node,[number,number][]>();
-  let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
+  let source = markdown.charCodeAt(0) === 0xfeff ? markdown.slice(1) : markdown;
+  if(source.includes("\r")) source=source.replace(/\r\n?/g,"\n");
   // Top-level blocks, recorded while reading `topSource` from line `topBase`.
   const tops: Top[]=[];
   let topBase=0, topSource=source, restartable=keep && !/[\r\uFEFF]/.test(markdown);
@@ -1050,19 +1051,34 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     const starts=new Map<number,number>();
     // Tokens from one block share its lines; resuming starts at the block's first.
     old.forEach((top,index)=>{ if(top.start>oldLast && !starts.has(top.start)) starts.set(top.start,index); });
-    let resume=old.length;
+    let resume=old.length, stopped=-1;
     const stop=(line: number)=>{
       const at=restart+line;
       const index=at>newLast ? starts.get(at-delta) : undefined;
       if(index === undefined) return false;
-      resume=index; return true;
+      resume=index; stopped=at; return true;
     };
-    // The previous reading's definitions; the check below confirms they hold.
-    env.references={...session.references};
-    for(const label of session.footnotes) footnotes.add(label);
-    const region=source.slice(offset);
+    // Reading usually stops within a few blocks of the edit, so the first read
+    // takes the text through the fourth block after it. A block's reading sees
+    // only its lines and the next, so a stop before that text's last line reads
+    // as it would in the whole text; otherwise the read takes the rest.
+    const next=old.findIndex(top=>top.start>oldLast);
+    const bound=next >= 0 && next+4<old.length ? old[next+4]!.start+delta : -1;
+    let end=source.length;
+    if(bound>restart) { end=offset; for(let line=restart;line<bound && end >= 0;line++) end=source.indexOf("\n",end)+1 || -1; if(end <= 0) end=source.length; }
+    let region: string, tokens: Token[];
+    for(;;) {
+      // The previous reading's definitions; the check below confirms they hold.
+      env.references={...session.references};
+      footnotes.clear(); for(const label of session.footnotes) footnotes.add(label);
+      resume=old.length; stopped=-1;
+      region=source.slice(offset,end);
+      tokens=md.parse(region,env,stop);
+      if(end === source.length || stopped >= 0 && stopped<bound) break;
+      end=source.length;
+    }
     topBase=restart; topSource=region;
-    const raw=blocks(md.parse(region,env,stop),region);
+    const raw=blocks(tokens,region);
     if(!restartable || raw.some(isTab)) return;
     // Every block's inline content reads against the document's definitions:
     // re-read blocks that hold or held one, at any depth, re-read everything.
@@ -1162,10 +1178,10 @@ function recordedHash(node: Node): string {
  */
 function recordSource(document: Document, text: string, positions: WeakMap<Node,Position>, itemLines: WeakMap<Node,[number,number][]>, headLines: number, head: boolean, options: ConversionOptions): void {
   const starts=[0], ends: number[]=[];
-  for(let index=0;index<text.length;index++) {
+  if(text.includes("\r")) for(let index=0;index<text.length;index++) {
     const code=text.charCodeAt(index);
     if(code === 10 || code === 13) { ends.push(index); if(code === 13 && text.charCodeAt(index+1) === 10) index++; starts.push(index+1); }
-  }
+  } else for(let index=text.indexOf("\n");index >= 0;index=text.indexOf("\n",index+1)) { ends.push(index); starts.push(index+1); }
   ends.push(text.length);
   const hashes=document.body.map(recordedHash);
   // Where tags appear, which marks blocks holding HTML the safe profile may filter.

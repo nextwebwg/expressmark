@@ -43,7 +43,10 @@ class StateCore {
 }
 type CoreRule = (state: StateCore) => void;
 
-const normalize: CoreRule = state => { state.src = state.src.replace(/\r\n?/g, "\n").replace(/\0/g, "�"); };
+const normalize: CoreRule = state => {
+  if (state.src.includes("\r")) state.src = state.src.replace(/\r\n?/g, "\n");
+  if (state.src.includes("\0")) state.src = state.src.replace(/\0/g, "�");
+};
 const block: CoreRule = state => {
   if (!state.inlineMode) { state.md.block.parse(state.src, state.md, state.env, state.tokens, state.stop); return; }
   const token = new Token("inline", "", 0);

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.0
+
+- Read block quotes and list items as Parseman `lines()` runs: a line joins a
+  container by its prefix or lazily, and the run's body reads its lines as
+  blocks. Bare URLs and emails are found by Parseman grammars that match
+  linkify-it 6.1.0's exactly. Every
+  document of the fixtures, the CommonMark and GFM example sets and the README
+  corpus parses, lints, writes and writes canonically as 0.3.0 does, in both
+  syntaxes and both HTML profiles. The dependencies are Parseman 0.56.0,
+  entities, mdurl, punycode.js and uc.micro.
+- `parseDoc(markdown, options?)` parses for editing, and its
+  `edit(from, to, replacement)` re-reads from the top-level block before the
+  edit until the blocks after it start where they started before, reusing
+  every other block's nodes. Its document equals `parse` of the edited text. A
+  one-character edit in a 426 KB README takes EDIT_RATIO of a full parse. See
+  [the measurements](benchmarks/results/README.md).
+- Write an edited top-level list item by item and an edited pipe table cell by
+  cell: the items and cells an edit leaves alone keep their source.
+- The peak heap a pass over the README corpus reaches is the median over five
+  document orders; it moves with where the collector runs, and both 0.3.0 and
+  0.4.0 read within the same range as 0.2.2.
+- Benchmark each checkout in its own process per round, alternating base and
+  candidate.
+
 ## 0.3.0
 
 - Read Markdown with Parseman. The API, the AST and every output are those of
