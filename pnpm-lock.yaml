@@ -172,9 +172,6 @@ importers:
       htmlparser2:
         specifier: 12.0.0
         version: 12.0.0
-      linkify-it:
-        specifier: 6.1.0
-        version: 6.1.0
       mdurl:
         specifier: 2.1.0
         version: 2.1.0
@@ -1008,9 +1005,6 @@ packages:
     resolution: {integrity: sha512-soXv8qKLqsAA3Ws9HDwrf6VlLUHHKBqLplHVJ/HVhWH5Oakgr5iZmsiKX7eC2VMdZxFaxhLxDsAmiCjLvKPZlQ==}
     engines: {node: '>=18.0.0'}
 
-  linkify-it@6.1.0:
-    resolution: {integrity: sha512-wJ/TwpSDTLepCrQoYWYIExIKg5Zchex2Nn5yk2mFnB+6PtdkHtyLx742md9csRjjOnGkKIS/RrbY7l8D6gT9Vw==}
-
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -1703,10 +1697,6 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.33.0
 
   linecraft@0.2.6: {}
-
-  linkify-it@6.1.0:
-    dependencies:
-      uc.micro: 3.0.0
 
   magic-string@0.30.21:
     dependencies:

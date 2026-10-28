@@ -25,9 +25,9 @@
  */
 // A configured Markdown reader: block and inline rule lists, the core passes
 // that run between them, and options. Expressmark builds one per rule set.
-import { LinkifyIt } from "linkify-it";
 import { ParserBlock, StateBlock, type Env } from "./block.js";
 import { ParserInline, StateInline } from "./inline.js";
+import { linkify as bareLinks, type Linkify } from "./linkify.js";
 import { normalizeLink, normalizeLinkText, parseLinkLabel, validateLink } from "./links.js";
 import { Ruler } from "./ruler.js";
 import { Token } from "./token.js";
@@ -139,22 +139,19 @@ const text_join: CoreRule = state => {
   }
 };
 
-/** The URL detector a reader shares with its writer's escaping. */
-export function createLinkify(): LinkifyIt { return new LinkifyIt(); }
-
 export class Engine {
   options: EngineOptions;
   block = new ParserBlock();
   inline = new ParserInline();
   core = { ruler: new Ruler<CoreRule>() };
-  linkify: LinkifyIt;
+  linkify: Linkify;
   helpers = { parseLinkLabel };
   utils = { unescapeAll };
   validateLink = validateLink;
   normalizeLink = normalizeLink;
   normalizeLinkText = normalizeLinkText;
   /** `zero` enables only paragraphs and text, for callers that add the rules they need. */
-  constructor(preset: "default" | "zero", options: Partial<EngineOptions> = {}, linkify: LinkifyIt = createLinkify()) {
+  constructor(preset: "default" | "zero", options: Partial<EngineOptions> = {}, linkify: Linkify = bareLinks) {
     for (const [name, fn] of [["normalize", normalize], ["block", block], ["strip_references", strip_references], ["inline", inline], ["linkify", linkifyText], ["text_join", text_join]] as const) this.core.ruler.push(name, fn);
     this.linkify = linkify;
     this.options = { html: false, linkify: false, maxNesting: preset === "zero" ? 20 : 100, ...options };

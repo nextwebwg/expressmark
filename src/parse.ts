@@ -1,6 +1,5 @@
 import { Engine, type StateBlock, type StateInline, type Token } from "./markdown/engine.js";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
-import { autolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
 import { alertMarker, attach, compact, contentHash, contentHashes, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
@@ -61,8 +60,8 @@ function readers(standard: ReadonlySet<StandardRule>): Readers {
   const key=[...standard].sort().join(",");
   const cached=readerCache.get(key);
   if(cached) return cached;
-  const md=new Engine("default",{html:true,linkify:true},autolinks);
-  const lexicalMd=new Engine("default",{html:true},autolinks);
+  const md=new Engine("default",{html:true,linkify:true});
+  const lexicalMd=new Engine("default",{html:true});
   const originals={reference:md.block.ruler.get("reference").fn,newline:md.inline.ruler.get("newline").fn,link:md.inline.ruler.get("link").fn,image:md.inline.ruler.get("image").fn};
   const inlineHook=(name: keyof Hooks): InlineHook => (state,silent) => (hooksOf(state)[name] as InlineHook)(state,silent);
   const blockHook=(name: keyof Hooks): BlockHook => (state,start,end,silent) => (hooksOf(state)[name] as BlockHook)(state,start,end,silent);

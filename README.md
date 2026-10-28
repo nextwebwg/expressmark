@@ -226,10 +226,10 @@ watch and benchmark commands. Shared settings take effect locally after merging
 them to the default branch.
 
 TypeScript 7 builds strict ESM declarations. Parseman grammars recognize Markdown's
-constructs and the extension tokens; the reader in `src/markdown` applies
-CommonMark's block and emphasis algorithms to what they recognize. YAML handles
-metadata, linkify-it finds bare URLs, and sanitize-html with htmlparser2 handles
-the safe native profile. Oxlint and Vitest check conversions,
+constructs, the extension tokens and bare URLs; the reader in `src/markdown`
+applies CommonMark's block and emphasis algorithms to what they recognize, and
+reads block quotes and list items as Parseman line runs. YAML handles metadata,
+and sanitize-html with htmlparser2 handles the safe native profile. Oxlint and Vitest check conversions,
 unsafe input, malformed data, round trips and a fresh packed-package consumer.
 
 The manual **Release** workflow publishes reviewed `main` through the protected

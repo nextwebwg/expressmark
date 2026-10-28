@@ -1,5 +1,4 @@
 import { Engine, type StateInline } from "./markdown/engine.js";
-import { autolinks } from "./autolinks.js";
 import { mentionBoundary, normalizeLabel, readAttributes, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import type { Node } from "./types.js";
 
@@ -75,7 +74,7 @@ delimiters.inline.ruler2.before("fragments_join","literal_pairs",state=> {
   }
 });
 
-export const syntax=new Engine("zero",{html:true},autolinks).enable(["link","image","autolink","html_inline"]);
+export const syntax=new Engine("zero",{html:true}).enable(["link","image","autolink","html_inline"]);
 const syntaxRules=syntax.inline.ruler.getRules("");
 function opensInlineSyntax(state: StateInline, offset: number): boolean {
   state.pos=offset;

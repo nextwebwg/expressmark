@@ -64,32 +64,20 @@ cannot establish them.
 The boundary is explicit. Parseman grammars recognize what starts at a position:
 fences, ATX headings, thematic breaks, list markers, setext underlines, table
 delimiter rows and cells, the seven HTML block starts, HTML tags, text runs,
-autolinks, character references, angle-bracket destinations, and Expressive
-Markdown's identifiers, handles and attribute lists. The reader's passes are
-the context-sensitive parts of CommonMark that a grammar over one string does
-not express: container continuation and lazy lines (which strip a variable
-prefix from every line, with tabs split across columns), list tightness, link
-label scanning across nested constructs, reference resolution and the
-delimiter-run algorithm. Their behavior follows markdown-it 15.0.3 exactly; the
-benchmark suite's `parity.mjs` checks this against any earlier checkout.
+autolinks, character references, angle-bracket destinations, bare URLs and
+emails, and Expressive Markdown's identifiers, handles and attribute lists.
+Block quotes and list items read as Parseman `lines()` runs: a line joins a run
+by its prefix or lazily, and the run's body reads the joined lines as blocks.
+The reader's passes are the context-sensitive parts of CommonMark that a
+grammar over one string does not express: the column arithmetic that narrows a
+container's lines (tabs split across columns), list tightness, link label
+scanning across nested constructs, reference resolution and the delimiter-run
+algorithm. Their behavior follows markdown-it 15.0.3 exactly, and bare URLs
+follow linkify-it 6.1.0; the benchmark suite's `parity.mjs` checks this against
+any earlier checkout.
 
 The reader runs the grammars through Parseman's interpreter, which constructs no
 code at runtime and so runs under a strict Content Security Policy.
-
-Open questions, each needing its own task:
-
-1. **Incremental parsing.** Top-level blocks are restart points: the block
-   reader's state is empty between them, and the source record already holds each
-   top-level block's line range. Re-reading from the block that contains an edit
-   until block boundaries realign, then converting only re-read blocks, maps onto
-   Parseman's `parseDoc` with the block reader as a rule function. Inline content
-   depends on the document's link and footnote labels, so a change to that label
-   set re-converts every block's inline content.
-2. **Containers as grammar.** Expressing blockquotes and list items as Parseman
-   rules needs a way to run a rule over lines with a per-line prefix removed and
-   spans mapped back, a capability Parseman does not offer.
-3. **Bare URL detection** uses linkify-it's patterns; a Parseman grammar for GFM's
-   autolink extension would need to reproduce its boundaries exactly.
 
 Any change here keeps the public AST and converter contracts stable unless the
 owner approves a change.

@@ -60,7 +60,6 @@
   "dependencies": {
     "entities": "8.1.0",
     "htmlparser2": "12.0.0",
-    "linkify-it": "6.1.0",
     "mdurl": "2.1.0",
     "parseman": "0.55.3",
     "punycode.js": "2.3.1",
