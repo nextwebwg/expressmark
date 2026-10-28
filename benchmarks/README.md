@@ -74,7 +74,19 @@ one-minute load average is above 3; run it on an idle machine.
 `parity.mjs` takes the same `--base` and `--candidate` and compares everything a
 caller observes: the parsed document, its diagnostics with and without lint,
 its exact writing and its canonical writing, in both syntaxes and both HTML
-profiles. It exits non-zero on any difference.
+profiles. It compares the first five fields of each recorded source block,
+which every version records. It exits non-zero on any difference.
+
+`incremental.mjs` times a one-character edit in the corpus's largest README
+(or `BENCH_INCREMENTAL_FILE`): `parseDoc`'s `edit` against a full `parse` of
+the edited text, in both syntaxes, alternating per round for `BENCH_ROUNDS`
+rounds over `BENCH_EDITS` positions (default 9) in prose lines. It first checks
+that every edit reads as a full parse does.
+
+```sh
+node benchmarks/incremental.mjs > benchmarks/work/incremental.json
+node benchmarks/report.mjs benchmarks/work/incremental.json
+```
 
 ## What is compared
 
