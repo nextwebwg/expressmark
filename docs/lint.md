@@ -42,7 +42,7 @@ Without `preferredForms`, `stringify` writes each authored spelling back.
 | `prefer-dash-bullet` | `*` or `+` bullets | `-` |
 | `prefer-dot-delimiter` | `1)` | `1.` |
 | `prefer-incrementing-numbers` | Repeated item numbers | `1.` `2.` `3.` |
-| `prefer-list-bullet` | An item whose bullet or delimiter differs from its list's, in `modern` | the list's own |
+| `prefer-list-bullet` | An item whose bullet or delimiter differs from its list's, in `standard` | the list's own |
 | `prefer-lowercase-task` | `[X]` | `[x]` |
 | `prefer-dash-break` | `***`, `___` or a spaced or longer break | `---` |
 | `prefer-link-syntax` | `<url>` or a bare URL | `[text](url)` |
@@ -51,9 +51,9 @@ Without `preferredForms`, `stringify` writes each authored spelling back.
 | `prefer-named-table` | A pipe table or positional list rows | a `::: table` with named fields |
 | `prefer-bracketed-mention` | A bare `@handle` | `@[label]` |
 | `prefer-canonical-line-block` | Line-block marker spacing or continuation lines | `\| ` lines |
-| `mixed-indentation` | A list mixing tabs and spaces, in `compatible` (always reported in `modern`) | one kind of indentation |
+| `mixed-indentation` | A list mixing tabs and spaces, in `compatible` (always reported in `standard`) | one kind of indentation |
 | `br-end-tag` | `</br>`, read as `<br>` | `<br>` |
-| `table-code-pipe` | `\|` inside a table cell's code span, in `compatible`; `modern` keeps the backslash | `\|` written as `|` inside the code span |
+| `table-code-pipe` | `\|` inside a table cell's code span, in `compatible`; `standard` keeps the backslash | `\|` written as `|` inside the code span |
 
 Longhand attributes, `{class="…" id="…"}`, work the same as `{.class #id}` and
 have no rule, and a typeless container such as `::: {.render}` is a preferred
@@ -61,15 +61,15 @@ form. A list right after another list keeps the bullet that separates them, so
 it has no warning. Conversion-only spellings, such as `:mention` and
 `== Label`, are not accepted spellings and have no rule.
 
-## Accepted readings in `modern`
+## Accepted readings in `standard`
 
-Two readings change on purpose when a document moves to `modern`, as
-[syntax](syntax.md#moving-a-document-to-modern) describes: `\|` inside a table
+Two readings change on purpose when a document moves to `standard`, as
+[syntax](syntax.md#moving-a-document-to-standard) describes: `\|` inside a table
 code span shows its backslash, which `table-code-pipe` flags, and
 `[url](some words)` is a link to `some%20words`.
 
-## Follow-up: migrating to `modern`
+## Follow-up: migrating to `standard`
 
 A rule that flags, in a `compatible` document, each construct that renders
-differently under [`modern`](syntax.md) is a follow-up. Today, the rules above
+differently under [`standard`](syntax.md) is a follow-up. Today, the rules above
 already flag indented code, setext headings and trailing-space breaks.

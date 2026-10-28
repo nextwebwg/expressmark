@@ -1,10 +1,11 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { ConversionError, parse, stringify, type Document, type Node } from "../src/index.js";
+import { ConversionError, type Document, type Node } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
 
 const ref = (label: string, referenceType: NonNullable<Node["referenceType"]>, value = label): Node => ({type:"linkReference",label,referenceType,value});
 const definition = (label: string, url: string, title?: string): Node => ({type:"definition",label,url,...(title ? {title}:{})});
-const document = (...body: Node[]): Document => ({type:"document",version:1,body});
+const document = (...body: Node[]): Document => ({type:"document",version:1,syntax:"compatible",body});
 
 // Each source is canonical: the authored forms and definition placement survive
 // a parse and write byte for byte.

@@ -1,5 +1,7 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { parse as parseMarkdown, stringify as writeMarkdown, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { renderHtml } from "../src/render.js";
 import { semantic } from "./semantic.js";
 
 const p = (value: string): Node => ({type:"paragraph",value});
@@ -11,7 +13,7 @@ const source = (body: string, settings = ""): string => `::: table${settings ? `
 function check(markdown: string, expected: Node[]): Document {
   const diagnostics: Diagnostic[]=[];
   const document=parse(markdown,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
-  expect(semantic(document)).toEqual({type:"document",version:1,body:expected});
+  expect(semantic(document)).toEqual({type:"document",version:1,syntax:"compatible",body:expected});
   const output=stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
   expect(parse(output,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)})).toEqual(document);
   expect(diagnostics).toEqual([]);
@@ -59,6 +61,29 @@ describe("named list tables",()=> {
     check(source('- Code: ```md\n  Name: literal code\n  ```\n  Name: Actual'),[
       table(row(cell("Code",true),cell("Name",true)),row({type:"tableCell",body:[{type:"code",language:"md",value:"Name: literal code"}]},cell("Actual"))),
     ]);
+  });
+  it.each(["standard","compatible"] as const)("keeps a leading code span containing a fence inside its named field in %s",syntax=> {
+    const markdown=`${source('- Example: ```` ```js <tag> ````\n  Result: ```` ```sh <other> ````')}\n\n## Following\n\n\`<tag>\``;
+    const diagnostics: Diagnostic[]=[];
+    const options={syntax,onDiagnostic:(diagnostic: Diagnostic)=>diagnostics.push(diagnostic)};
+    const document=parseMarkdown(markdown,options);
+    expect(semantic(document.body)).toEqual([
+      table(row(cell("Example",true),cell("Result",true)),row(
+        {type:"tableCell",children:[{type:"inlineCode",value:"```js <tag>"}]},
+        {type:"tableCell",children:[{type:"inlineCode",value:"```sh <other>"}]},
+      )),
+      {type:"heading",level:2,value:"Following"},
+      {type:"paragraph",children:[{type:"inlineCode",value:"<tag>"}]},
+    ]);
+    const output=writeMarkdown(document,{...options,preferredForms:true});
+    const reparsed=parseMarkdown(output,options);
+    expect(semantic(reparsed)).toEqual(semantic(document));
+    expect(writeMarkdown(reparsed,{...options,preferredForms:true})).toBe(output);
+    const html=renderHtml(reparsed);
+    expect(html).toContain('<td><code>```js &lt;tag&gt;</code></td>');
+    expect(html).toContain('<td><code>```sh &lt;other&gt;</code></td>');
+    expect(html).toContain('<h2>Following</h2><p><code>&lt;tag&gt;</code></p>');
+    expect(diagnostics).toEqual([]);
   });
   it("preserves nonbreaking spaces in exact column identities",()=> {
     check(source('- Name: A\n  \u00a0Name: B'),[table(row(cell("Name",true),cell("\u00a0Name",true)),row(cell("A"),cell("B")))]);
@@ -185,7 +210,7 @@ it("keeps table content safe and code literal across both conversion boundaries"
 });
 
 it("writes editable list-table source for both simple and rich cells",()=> {
-  const document: Document={type:"document",version:1,body:[table(row(cell("A",true),cell("B",true)),row(cell("Value"),{type:"tableCell",body:[p("First"),p("Second")]}))]};
+  const document: Document={type:"document",version:1,syntax:"compatible",body:[table(row(cell("A",true),cell("B",true)),row(cell("Value"),{type:"tableCell",body:[p("First"),p("Second")]}))]};
   const output=stringify(document);
   expect(output).toContain('::: table');
   expect(output).not.toContain('<table');

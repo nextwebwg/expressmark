@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { parse, stringify, type Document } from "../src/index.js";
+import { type Document } from "../src/index.js";
 
 // Every accepted spelling of a construct writes back byte for byte, and reads
 // back as the same document, spelling included.
@@ -68,7 +69,7 @@ describe("authored forms", () => {
 
 describe("preferred forms", () => {
   it("writes new content in the preferred spelling", () => {
-    const document: Document = {type:"document",version:1,body:[
+    const document: Document = {type:"document",version:1,syntax:"compatible",body:[
       {type:"heading",level:1,value:"Title"},
       {type:"paragraph",children:[{type:"emphasis",value:"care"},{type:"text",value:" "},{type:"strong",value:"twice"},{type:"break"},{type:"link",url:"https://example.com",value:"https://example.com"}]},
       {type:"list",ordered:false,tight:true,children:[{type:"listItem",checked:true,body:[{type:"paragraph",value:"Done"}]}]},

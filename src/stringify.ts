@@ -8,7 +8,7 @@ import { preferForms } from "./lint.js";
 import { footnoteDefinitions, linkDefinitions } from "./references.js";
 import { tableGrid, transposeTable } from "./tables.js";
 import type { Attributes, ConversionOptions, Document, Node } from "./types.js";
-import { ConversionError, warn } from "./types.js";
+import { ConversionError, validateSyntax, warn } from "./types.js";
 
 function fail(message: string): never { throw new ConversionError("unsupported-conversion",message); }
 function inlineCode(value: string): string {
@@ -95,7 +95,7 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.type === "group" && node.tag !== undefined && node.tag !== (node.display === "inline" ? "span":"div")) fail(`${path} native tag conflicts with its display.`);
   if(["link","linkReference"].includes(node.type) && node.children?.some(child=>["link","linkReference"].includes(child.type))) fail(`${path} cannot contain nested links.`);
   if(node.type === "tableRow" && node.children?.some(child=>child.type !== "tableCell")) fail(`${path} needs tableCell children.`);
-  if(node.type === "document" && (node as Document).syntax !== undefined && !["compatible","modern"].includes((node as Document).syntax!)) fail(`${path}.syntax needs compatible or modern.`);
+  if(node.type === "document" && (node as Document).syntax !== undefined && !["compatible","standard"].includes((node as Document).syntax!)) fail(`${path}.syntax needs compatible or standard.`);
   if(node.type === "htmlElement") {
     const tag=typeof node.tag === "string" && /^[A-Za-z][A-Za-z0-9-]*$/.test(node.tag) ? node.tag : fail(`${path} needs an element tag name.`);
     // `</br>` is read as a `<br>` element.
@@ -132,6 +132,7 @@ function validateMetadata(value: unknown, ancestors=new Set<unknown>()): void {
 }
 
 export function stringify(document: Document, options: ConversionOptions = {}): string {
+  validateSyntax(options.syntax);
   document=normalizeAbsence(document) as Document;
   // The copies drop each spelling the lint rules flag, so the preferred form is written.
   if(options.preferredForms) preferForms(document);
@@ -150,7 +151,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   // Authored spellings recorded in `source`. Each is written back only while
   // it still reads as the node; otherwise the preferred spelling is written.
   // Probes read source with the document's own syntax and profile.
-  const probeOptions: ConversionOptions={...(options.trustedHtml ? {trustedHtml:true}:{}),...(document.syntax === "modern" ? {syntax:"modern" as const}:{})};
+  const probeOptions: ConversionOptions={...(options.trustedHtml ? {trustedHtml:true}:{}),syntax:document.syntax ?? "standard"};
   const spelling=(node: Node, key: string): string | undefined => typeof node.source?.[key] === "string" ? node.source[key] as string : undefined;
   const reads=(markdown: string, node: Node, pick: (document: Document)=>Node | undefined = document=>document.body[0], key?: string, holder: Node = node): boolean => {
     if(key && spellingHolds(originals.get(holder) ?? holder,holder,key)) return true;
@@ -376,8 +377,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const same=node.ordered && spelling(node,"numbering") === "same";
     return node.children.map((item,index)=> {
       if(item.id !== undefined || item.attributes) fail("List-item attributes need a native list wrapper.");
-      // An item's own bullet or delimiter, which `modern` syntax keeps in the list.
-      const own=document.syntax === "modern" ? spelling(item,"bullet"):undefined;
+      // An item's own bullet or delimiter, which `standard` syntax keeps in the list.
+      const own=document.syntax !== "compatible" ? spelling(item,"bullet"):undefined;
       const prefix=node.ordered ? `${same ? start:start+index}${own === ")" || own === "." ? own:delimiter} `:`${own && "-*+".includes(own) ? own:bullet} `;
       const task=item.checked === undefined ? "" : `[${item.checked ? spelling(item,"marker") === "X" ? "X":"x":" "}] `;
       // Task markers are structural only at the start of a list item. A plain
@@ -496,7 +497,9 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "list") return list(node);
     if(node.type === "htmlElement") {
       const authored=spelling(node,"markdown");
-      if(authored && reads(authored,node,undefined,"markdown")) return authored;
+      // A matching source hash proves the node is unedited, not that the
+      // write-time HTML profile permits the attributes read under trust.
+      if(authored && (options.trustedHtml || sanitizeFragment(authored,options) === authored) && reads(authored,node,undefined,"markdown")) return authored;
       if(!node.body) return `${elementTag(node.open!)}${node.value ?? ""}${node.close ?? ""}`;
       // Blank lines inside the element give its paragraphs `<p>`. A tight
       // element's blocks are written line by line while that reads back.
@@ -592,7 +595,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   }
   if(document.attributes && Object.keys(document.attributes).length) fail("Root attributes have no core frontmatter mapping.");
   // A syntax other than the host's default is written as the `markdownSyntax` key.
-  if(document.syntax !== undefined && document.syntax !== (options.syntax ?? "compatible")) metadata.markdownSyntax=document.syntax;
+  if((document.syntax ?? "standard") !== (options.syntax ?? "standard")) metadata.markdownSyntax=document.syntax ?? "standard";
   const authoredYaml=spelling(document,"frontmatter");
   const keepYaml=authoredYaml !== undefined && reads(`---\n${authoredYaml}\n---\n`,{type:"document",body:[],...(document.id !== undefined ? {id:document.id}:{}),...(document.title !== undefined ? {title:document.title}:{}),...(document.metadata ? {metadata:document.metadata}:{}),...(document.syntax ? {syntax:document.syntax}:{})} as Node,parsed=>({...parsed,version:undefined,body:[]} as unknown as Node),"frontmatter",document);
   const head=keepYaml ? `---\n${authoredYaml}\n---\n\n` : Object.keys(metadata).length ? `---\n${yamlStringify(metadata,{schema:"core",lineWidth:0}).trimEnd()}\n---\n\n`:"";

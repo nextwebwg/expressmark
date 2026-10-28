@@ -96,7 +96,7 @@ export function readListTable(container: Node, source: string, read: (source: st
       return {type:"tableCell",body};
     }
     if(root.length) {
-      // Blank lines between rows keep one table, though `modern` syntax splits the list there.
+      // Blank lines between rows keep one table, though `standard` syntax splits the list there.
       if(root.some(block=>block.token.type !== "bullet_list_open")) invalid("A table body must contain one unordered list.");
       for(const [index,item] of root.flatMap(list=>list.children).entries()) {
         const value=itemSource(source,item);

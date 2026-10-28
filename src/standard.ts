@@ -5,9 +5,9 @@ import { rawTextElements, readElement, readStartTag, type ElementExtent } from "
 import type { ConversionOptions } from "./types.js";
 import { linting, warn } from "./types.js";
 
-/** The rules `modern` syntax changes; `compatible` syntax keeps CommonMark and GFM's. */
-export const modernRules = ["html","indentedCode","setext","spaceBreaks","tableCode","lazy","bullets","spacedTargets","relativeLists","looseLists","lastDefinition"] as const;
-export type ModernRule = typeof modernRules[number];
+/** The rules `standard` syntax changes; `compatible` syntax keeps CommonMark and GFM's. */
+export const standardRules = ["html","indentedCode","setext","spaceBreaks","tableCode","lazy","bullets","spacedTargets","relativeLists","looseLists","lastDefinition"] as const;
+export type StandardRule = typeof standardRules[number];
 type BlockRule = (state: StateBlock, start: number, end: number, silent: boolean) => boolean;
 type InlineRule = (state: StateInline, silent: boolean) => boolean;
 const entry = <T,>(ruler: Ruler<T>, name: string) => ruler.get(name);
@@ -17,9 +17,9 @@ const trim = (value: string) => value.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, ""
 // A parse's options travel with its reader state, so one reader serves every parse.
 const optionsOf = (state: { env: Record<string, unknown> }) => state.env.options as ConversionOptions;
 
-/** Install `modern` syntax's rules on a reader. */
-export function installModern(md: Engine, lexical: Engine, rules: ReadonlySet<ModernRule>): void {
-  const on = (rule: ModernRule) => rules.has(rule);
+/** Install `standard` syntax's rules on a reader. */
+export function installStandard(md: Engine, lexical: Engine, rules: ReadonlySet<StandardRule>): void {
+  const on = (rule: StandardRule) => rules.has(rule);
   const block = md.block.ruler;
   if (on("indentedCode")) {
     block.disable("code"); lexical.block.ruler.disable("code");
@@ -58,7 +58,7 @@ export function installModern(md: Engine, lexical: Engine, rules: ReadonlySet<Mo
   if (on("html")) {
     const rule = entry<BlockRule>(block, "html_block")!;
     block.at("html_block", (state, start, end, silent) => htmlElement(state, start, end, silent, optionsOf(state)), { alt: [...rule.alt] });
-    md.inline.ruler.before("autolink", "modern_raw_text", (state, silent) => rawText(state, silent, optionsOf(state)));
+    md.inline.ruler.before("autolink", "standard_raw_text", (state, silent) => rawText(state, silent, optionsOf(state)));
   }
   if (on("spaceBreaks")) {
     // Trailing spaces are insignificant; a break is a trailing backslash or `<br>`.
@@ -71,8 +71,8 @@ export function installModern(md: Engine, lexical: Engine, rules: ReadonlySet<Mo
     });
   }
   if (on("spacedTargets")) {
-    md.inline.ruler.before("link", "modern_spaced_link", (state, silent) => spacedTarget(state, silent, false));
-    md.inline.ruler.before("image", "modern_spaced_image", (state, silent) => spacedTarget(state, silent, true));
+    md.inline.ruler.before("link", "standard_spaced_link", (state, silent) => spacedTarget(state, silent, false));
+    md.inline.ruler.before("image", "standard_spaced_image", (state, silent) => spacedTarget(state, silent, true));
   }
 }
 
@@ -102,10 +102,10 @@ function paragraph(state: StateBlock, start: number, end: number, noLazy: boolea
 const leading = (state: StateBlock, line: number) => state.src.slice(state.bMarks[line]!, state.bMarks[line]! + state.tShift[line]!);
 const unrelated = (a: string, b: string) => !a.startsWith(b) && !b.startsWith(a);
 
-// CommonMark's list rule with `modern` syntax's choices: a line indented past
+// CommonMark's list rule with `standard` syntax's choices: a line indented past
 // its item's marker belongs to the item, any bullet or ordered delimiter
 // continues the list, and a blank line between items ends the list.
-function list(state: StateBlock, startLine: number, endLine: number, silent: boolean, rules: ReadonlySet<ModernRule>, options: ConversionOptions): boolean {
+function list(state: StateBlock, startLine: number, endLine: number, silent: boolean, rules: ReadonlySet<StandardRule>, options: ConversionOptions): boolean {
   const relative = rules.has("relativeLists"), anyMarker = rules.has("bullets"), split = rules.has("looseLists"), anyIndent = rules.has("indentedCode");
   let line = startLine;
   if (!anyIndent && state.sCount[line]! - state.blkIndent >= 4) return false;

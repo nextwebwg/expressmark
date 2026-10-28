@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { anchorText, headingAnchors, parse, stringify, type HtmlAllowlist } from "../src/index.js";
+import { anchorText, headingAnchors, type HtmlAllowlist } from "../src/index.js";
 import { renderHtml } from "../src/render.js";
 
 const authored = [
@@ -88,6 +89,15 @@ describe("text escaping hook", () => {
   });
   it("cannot be forged by marker characters in authored text", () => {
     expect(renderHtml(parse("a\u0003b\u0002c{"),{escapeText:escapeBraces})).toBe("<p>abc&#123;</p>");
+  });
+  it.each([true, false])("escapes native code and pre text after filtering, preserving markup and attributes with trustedHtml=%s", trustedHtml => {
+    for (const tag of ["code", "pre"]) {
+      const source=`<${tag} title="{attribute}">{value} &amp; <span class="token" title="{attribute}">{nested}</span><script>{filtered}</script></${tag}>`;
+      const seen: string[]=[];
+      const html=renderHtml(parse(source,{syntax:"standard",trustedHtml}),{escapeText:run=> { seen.push(run); return escapeBraces(run); }});
+      expect(html).toBe(`<${tag} title="{attribute}">&#123;value} &amp; <span class="token" title="{attribute}">&#123;nested}</span></${tag}>`);
+      expect(seen.join("")).toBe("{value} &amp; {nested}");
+    }
   });
 });
 

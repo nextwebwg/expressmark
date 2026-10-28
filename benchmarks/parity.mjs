@@ -9,7 +9,7 @@ const legs = checkouts();
 for (const leg of legs) console.log(`${leg.name}: expressmark ${leg.version} (${leg.engine}) at ${leg.dir} ${leg.commit.slice(0, 12)}`);
 const [reference, candidate] = await Promise.all(legs.map(leg => import(leg.entry)));
 const sets = process.argv.find(arg => arg.startsWith("--sets="))?.slice(7).split(",") ?? setNames;
-const variants = ["compatible", "modern"].flatMap(syntax => [false, true].flatMap(trustedHtml => [false, true].map(lint => ({ syntax, trustedHtml, lint }))));
+const variants = ["compatible", "standard"].flatMap(syntax => [false, true].flatMap(trustedHtml => [false, true].map(lint => ({ syntax, trustedHtml, lint }))));
 const describeVariant = ({ syntax, trustedHtml, lint }) => `${syntax}${trustedHtml ? " trusted" : ""}${lint ? " lint" : ""}`;
 
 // Writing without the recorded source text exercises the canonical writer.
@@ -28,7 +28,7 @@ let failures = 0;
 for (const set of sets) {
   const documents = await inputSet(set);
   for (const variant of variants) {
-    const options = { ...(variant.trustedHtml ? { trustedHtml: true } : {}), ...(variant.syntax === "modern" ? { syntax: "modern" } : {}), lint: variant.lint };
+    const options = { ...(variant.trustedHtml ? { trustedHtml: true } : {}), syntax: variant.syntax, lint: variant.lint };
     let differing = 0;
     for (const [index, source] of documents.entries()) {
       const expected = outcome(reference, source, options), actual = outcome(candidate, source, options);

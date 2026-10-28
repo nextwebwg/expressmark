@@ -36,6 +36,10 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
     const rendered = execFileSync(process.execPath, ["--input-type=module", "--eval",
       'import {parse} from "expressmark"; import {renderHtml} from "expressmark/render"; console.log(renderHtml(parse("# Hello"), {transformers:{heading:(_node,ctx)=>`<aside>${ctx.renderChildren()}</aside>`}}));'], options);
     expect(rendered.trim()).toBe("<aside>Hello</aside>");
+    const syntax = execFileSync(process.execPath, ["--input-type=module", "--eval",
+      'import {parse,stringify} from "expressmark"; const doc=parse("Title\\n---",{syntax:"standard"}); let rejected=false; try {parse("Text",{syntax:"modern"})} catch(error) {rejected=error instanceof TypeError} console.log(JSON.stringify({syntax:doc.syntax ?? "standard",types:doc.body.map(node=>node.type),written:stringify(doc),rejected}));'], options);
+    expect(JSON.parse(syntax)).toMatchObject({syntax:"standard",types:["paragraph","horizontalRule"],rejected:true});
+    expect(JSON.parse(syntax).written).not.toContain("markdownSyntax:");
     const converted = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: warning [Check]\\nBackup first.\\n:::"); console.log(stringify(doc));'], options);
     expect(converted).toContain("warning");
     const table = execFileSync(process.execPath, ["--input-type=module", "--eval", 'import {parse,stringify} from "expressmark"; const doc=parse("::: table {transpose}\\n- Name: Alpha\\n  Role: Reviewer\\n:::"); const markdown=stringify(doc); console.log(JSON.stringify({doc,again:parse(markdown),markdown}));'], options);
@@ -43,7 +47,7 @@ it("ships a working ESM converter with declarations to a fresh package consumer"
     expect(result.doc.body[0]).toMatchObject({type:"table",children:[{children:[{header:true,value:"Name"},{value:"Alpha"}]},{children:[{header:true,value:"Role"},{value:"Reviewer"}]}]});
     expect(result.again).toEqual(result.doc);
     expect(result.markdown).toContain("table");
-    writeFileSync(join(consumer, "index.ts"), 'import {parse,stringify,type Document} from "expressmark"; import {renderHtml,type HtmlTransformer} from "expressmark/render"; const doc: Document = parse("# Hello"); stringify(doc); const heading: HtmlTransformer = (_node,ctx) => ctx.renderDefault(); renderHtml(doc,{transformers:{heading}});\n');
+    writeFileSync(join(consumer, "index.ts"), 'import {parse,stringify,type Document,type Syntax} from "expressmark"; import {renderHtml,type HtmlTransformer} from "expressmark/render"; const syntax: Syntax = "standard"; const doc: Document = parse("# Hello",{syntax}); stringify(doc); const heading: HtmlTransformer = (_node,ctx) => ctx.renderDefault(); renderHtml(doc,{transformers:{heading}});\n// @ts-expect-error modern was removed\nconst old: Syntax = "modern";\n');
     const tsc = fileURLToPath(new URL("./bin/tsc", import.meta.resolve("typescript/package.json")));
     execFileSync(process.execPath, [tsc, "--strict", "--noEmit", "--skipLibCheck", "--target", "ES2023",
       "--module", "NodeNext", "index.ts"], options);

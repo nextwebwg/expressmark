@@ -21,7 +21,7 @@ const durationMs = Number(process.env.BENCH_DURATION_MS ?? 200);
 const warmupMs = Number(process.env.BENCH_WARMUP_MS ?? 500);
 assert(Number.isInteger(rounds) && rounds >= 4, "BENCH_ROUNDS must be an integer >= 4");
 assert(durationMs >= 10 && warmupMs >= 0, "BENCH_DURATION_MS must be >= 10");
-const optionsFor = syntax => syntax === "compatible" ? {} : { syntax };
+const optionsFor = syntax => ({ syntax });
 const median = values => { const sorted = [...values].sort((a, b) => a - b), middle = sorted.length >> 1; return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
 const quantile = (values, q) => { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]; };
 
@@ -79,7 +79,7 @@ const child = (...args) => {
   return JSON.parse(result.stdout.trim().split("\n").at(-1));
 };
 const results = [];
-for (const set of list(process.env.BENCH_SETS, setNames)) for (const syntax of list(process.env.BENCH_SYNTAXES, ["compatible", "modern"])) {
+for (const set of list(process.env.BENCH_SETS, setNames)) for (const syntax of list(process.env.BENCH_SYNTAXES, ["compatible", "standard"])) {
   const timing = child("--time", set, syntax, ...legs.map(leg => leg.entry));
   const memory = legs.map(leg => child("--memory", set, syntax, leg.entry));
   const [base, candidate] = timing.ms;

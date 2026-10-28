@@ -18,6 +18,12 @@ context when opening the document again.
 
 ## Quick start
 
+By default, Expressmark reads the **Expressive Markdown standard** (the documented
+draft subset). Use `{ syntax: "compatible" }` with both `parse` and `stringify`
+for CommonMark/GFM conventions plus Expressive Markdown extensions. Since 0.2.0,
+the explicit standard-mode option is `{ syntax: "standard" }`; the former
+`modern` name is removed. See [syntax](docs/syntax.md) for the differences.
+
 ```sh
 pnpm add expressmark
 ```
@@ -106,10 +112,11 @@ rendering is available from 0.1.2.
 
 ## What you can write
 
-- Two syntaxes: `compatible`, the default, reads CommonMark 0.31.2 and GFM
-  blocks and inline content, including tables, tasks, strikethrough and
-  autolinks; `modern` reads the Expressive Markdown specification, with
-  Markdown inside HTML elements and no indented code. The `syntax` option
+- Two syntaxes: `standard`, the default, follows the Expressive Markdown
+  standard (the documented draft subset), with Markdown inside HTML elements
+  and no indented code. Choose `compatible` explicitly for CommonMark 0.31.2
+  and GFM conventions, including tables, tasks, strikethrough and autolinks,
+  plus Expressive Markdown extensions. The `syntax` option
   chooses, and a document's `markdownSyntax` frontmatter overrides it; see
   [syntax](docs/syntax.md).
 - Lint warnings for spellings other than the preferred form, and a writer

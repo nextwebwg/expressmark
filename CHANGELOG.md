@@ -1,22 +1,47 @@
 # Changelog
 
-## 0.1.19
+## 0.2.3
 
 - Read Markdown with Parseman. Grammars in `src/markdown/lexicon.ts` recognize
   each block start and inline construct, and the reader in `src/markdown` applies
   CommonMark's container, link and emphasis algorithms to what they recognize,
   following markdown-it 15.0.3's behavior exactly. Every document of the
   CommonMark and GFM example sets and the 398-README corpus parses, lints, writes
-  and writes canonically as 0.1.18 does, in both syntaxes and both HTML profiles.
+  and writes canonically as 0.2.2 does, in both syntaxes and both HTML profiles.
   The dependencies are Parseman 0.55.3, entities, linkify-it, mdurl, punycode.js
   and uc.micro.
-- Parse in 0.80× of 0.1.18's time on the README corpus in `compatible` syntax,
-  0.54× in `modern`, and about 0.41× on the CommonMark and GFM examples, whose
+- Parse in 0.80× of 0.2.2's time on the README corpus in `compatible` syntax,
+  0.54× in `standard`, and about 0.41× on the CommonMark and GFM examples, whose
   short documents gain most from readers built once per rule set. See
   [the measurements](benchmarks/results/README.md).
 - Read a document's pipe tables and HTML elements in time linear in its length.
 - Round-trip every CommonMark 0.31.2 and GFM 0.29 example byte for byte in the
   test suite, in both syntaxes.
+
+## 0.2.2
+
+- Keep native `<code>` content opaque to Markdown in standard syntax, like
+  `<pre>`. Package scopes, emphasis markers and backticks stay literal inside
+  code, while native child markup and entities retain their HTML meaning.
+- Pass native `<code>` and `<pre>` text through the renderer's `escapeText`
+  hook after filtering, including text inside highlighting spans. Their markup
+  and attribute values stay outside the hook.
+
+## 0.2.1
+
+- Keep a code span beginning a named table field inline when it contains literal
+  backticks. It no longer opens a block fence that swallows the table's closing
+  line and following content, so literal HTML in code survives preferred writing.
+
+## 0.2.0
+
+- Rename the explicit Expressive Markdown syntax from `modern` to `standard` in
+  options, document ASTs and `markdownSyntax` frontmatter. No compatibility alias
+  is provided; update callers and stored documents. The default is now `standard`; opt into
+  `compatible` for the former CommonMark/GFM reading. Invalid runtime option
+  values now fail explicitly.
+- Filter authored HTML-element spellings when a document read with trusted HTML
+  is written with the safe profile.
 
 ## 0.1.18
 

@@ -1,5 +1,6 @@
+import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { describe, expect, it } from "vitest";
-import { parse, stringify, type Diagnostic, type Document, type Node } from "../src/index.js";
+import { type Diagnostic, type Document, type Node } from "../src/index.js";
 import { semantic } from "./semantic.js";
 
 // Original implementation fixtures organized by https://github.github.com/gfm/.
@@ -16,7 +17,7 @@ function cases(section: string, examples: Case[]): void {
   describe(section, () => {
     it.each(examples)("$name", ({source,body,codes}) => {
       const diagnostics: Diagnostic[] = [];
-      const expected: Document = {type:"document",version:1,body};
+      const expected: Document = {type:"document",version:1,syntax:"compatible",body};
       const document = parse(source,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});
       expect(semantic(document)).toEqual(expected);
       const output = stringify(document,{onDiagnostic:diagnostic=>diagnostics.push(diagnostic)});

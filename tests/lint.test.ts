@@ -59,15 +59,15 @@ describe("lint rules", () => {
     expect(warnings("- a\n\t- b\n    - c").map(diagnostic => diagnostic.code)).toContain("mixed-indentation");
     expect(warnings("- a\n\t- b\n    - c", "compatible", false)).toEqual([]);
   });
-  it("flags an item bullet that differs from its list's in modern syntax", () => {
-    expect(warnings("- a\n* b", "modern").map(diagnostic => diagnostic.code)).toEqual(["prefer-list-bullet"]);
-    expect(preferred("- a\n* b", "modern")).toBe("- a\n- b\n");
+  it("flags an item bullet that differs from its list's in standard syntax", () => {
+    expect(warnings("- a\n* b", "standard").map(diagnostic => diagnostic.code)).toEqual(["prefer-list-bullet"]);
+    expect(preferred("- a\n* b", "standard")).toBe("- a\n- b\n");
   });
   it("flags \\| inside a table code span in compatible syntax", () => {
     const table = "| Command | Use |\n| --- | --- |\n| `a \\| b` | either |";
     const pipes = (source: string, syntax: Syntax = "compatible") => warnings(source, syntax).filter(diagnostic => diagnostic.code === "table-code-pipe");
     expect(pipes(table)).toEqual([expect.objectContaining({ code: "table-code-pipe", position: { start: { line: 1, column: 1 }, end: { line: 3, column: 22 } } })]);
-    expect(pipes(table, "modern")).toEqual([]);
+    expect(pipes(table, "standard")).toEqual([]);
     expect(pipes("| a | b |\n| --- | --- |\n| x \\| y | z |")).toEqual([]);
   });
   it("writes authored spellings back without preferredForms", () => {

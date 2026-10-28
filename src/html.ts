@@ -393,11 +393,13 @@ export function safeAuthoredAttributes(input: Record<string,unknown>, options: C
   return result;
 }
 
-// Modern-mode elements, matched as HTML matches tags. Void elements take no
+// Standard-mode elements, matched as HTML matches tags. Void elements take no
 // closing tag; the raw-text elements hold their content verbatim through their
 // end; and HTML's optional end tags close an element where HTML closes it.
 export const voidElements = new Set(["area","base","br","col","embed","hr","img","input","link","meta","source","track","wbr"]);
-export const rawTextElements = new Set(["script","style","textarea","title","pre"]);
+// Code and pre keep authored HTML, including entities and highlighting spans,
+// opaque to Markdown; the HTML sanitizer still filters their rendered content.
+export const rawTextElements = new Set(["script","style","textarea","title","pre","code"]);
 const paragraphClosers = ["address","article","aside","blockquote","details","dialog","div","dl","fieldset","figcaption","figure","footer","form","h1","h2","h3","h4","h5","h6","header","hgroup","hr","main","menu","nav","ol","p","pre","search","section","table","ul"];
 // HTML's optional tags: each element's end tag may be left out before these
 // start tags, or at the end of its parent's content. A heading start tag also
