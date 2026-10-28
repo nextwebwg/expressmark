@@ -1,6 +1,6 @@
 import type { Engine, StateBlock, StateInline, Token } from "./markdown/engine.js";
 import type { Ruler } from "./markdown/ruler.js";
-import { skipBulletListMarker, skipOrderedListMarker } from "./markdown/block.js";
+import { readItem, skipBulletListMarker, skipOrderedListMarker } from "./markdown/block.js";
 import { rawTextElements, readElement, readStartTag, type ElementExtent } from "./html.js";
 import type { ConversionOptions } from "./types.js";
 import { linting, warn } from "./types.js";
@@ -169,8 +169,7 @@ function list(state: StateBlock, startLine: number, endLine: number, silent: boo
     // indentation is narrower than its marker.
     if (relative) { state.bMarks[line] = contentStart; state.tShift[line] = 0; state.sCount[line] = offset; }
     else { state.tShift[line] = contentStart - state.bMarks[line]!; state.sCount[line] = offset; }
-    if (contentStart >= max && state.isEmpty(line + 1)) state.line = Math.min(state.line + 2, endLine);
-    else state.md.block.tokenize(state, line, endLine);
+    readItem(state, line, endLine, after, contentStart >= max);
     const itemTight = state.tight;
     if (!state.tight || emptyEnd) tight = false;
     emptyEnd = state.line - line > 1 && state.isEmpty(state.line - 1);
