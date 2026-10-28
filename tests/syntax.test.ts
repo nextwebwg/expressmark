@@ -104,6 +104,26 @@ describe("HTML elements", () => {
     expect(render("<!-- **not bold** -->\nAfter")).toBe("<p>After</p>");
     roundTrips("<pre>\n**raw**\n\ntext\n</pre>");
   });
+  it.each([true, false])("keeps native code content literal with trustedHtml=%s", trustedHtml => {
+    for (const source of [
+      '<code>pnpm add @example/widget **literal** `ticks`</code>',
+      'Use <code>pnpm add @example/widget **literal** `ticks`</code> then **continue**.',
+      '<div><code>&lt;tag&gt; &amp; <span class="token">**literal** @example/widget</span></code></div>',
+    ]) {
+      const options = { syntax: "standard" as const, trustedHtml };
+      const document = parse(source, options);
+      const html = renderHtml(document);
+      expect(html).not.toContain('data-type="mention"');
+      expect(html).toContain('**literal**');
+      if (source.startsWith('Use ')) expect(html).toBe('<p>Use <code>pnpm add @example/widget **literal** `ticks`</code> then <strong>continue</strong>.</p>');
+      if (source.startsWith('<div>')) expect(html).toBe(source);
+      const output = stringify(document, { ...options, preferredForms: true });
+      expect(renderHtml(parse(output, options))).toBe(html);
+      expect(stringify(parse(output, options), { ...options, preferredForms: true })).toBe(output);
+      expect(renderHtml(parse(stringify(document, options), options))).toBe(html);
+    }
+    expect(renderHtml(parse('<code><img src="x" onerror="alert(1)">@example/widget</code>', { syntax: "standard", trustedHtml }))).toBe('<code><img src="x" />@example/widget</code>');
+  });
   it("ends an unclosed element with its enclosing block, with a diagnostic", () => {
     expect(render("- <div>\n  open\n\nAfter")).toBe("<ul><li><div>open</div></li></ul><p>After</p>");
     expect(codes("- <div>\n  open\n\nAfter")).toContain("unclosed-html-element");

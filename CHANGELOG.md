@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2
+
+- Keep native `<code>` content opaque to Markdown in standard syntax, like
+  `<pre>`. Package scopes, emphasis markers and backticks stay literal inside
+  code, while native child markup and entities retain their HTML meaning.
+- Pass native `<code>` and `<pre>` text through the renderer's `escapeText`
+  hook after filtering, including text inside highlighting spans. Their markup
+  and attribute values stay outside the hook.
+
 ## 0.2.1
 
 - Keep a code span beginning a named table field inline when it contains literal
