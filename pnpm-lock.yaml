@@ -176,8 +176,8 @@ importers:
         specifier: 2.1.0
         version: 2.1.0
       parseman:
-        specifier: 0.55.3
-        version: 0.55.3
+        specifier: 0.56.0
+        version: 0.56.0
       punycode.js:
         specifier: 2.3.1
         version: 2.3.1
@@ -1046,8 +1046,8 @@ packages:
   parse-srcset@1.0.2:
     resolution: {integrity: sha512-/2qh0lav6CmI15FzA3i/2Bzk2zCgQhGMkvhOhKNcBVQ1ldgpbfiNTVslmooUmWJcADi1f1kIeynbDRVzNlfR6Q==}
 
-  parseman@0.55.3:
-    resolution: {integrity: sha512-HBk/7+rRanvBu2F6uhGItVlnsfuCJfuHmlfA/GwZza5wRHlZAIcn0/3+8mOWIsXUuVyhxbtxe87h3BPNgo/WjQ==}
+  parseman@0.56.0:
+    resolution: {integrity: sha512-Jb4V2CSONx+gN8IPIO/10qnYAA5ZoUaRsadSURTfxDxI+4ZGNEuLqPGKU2W2ewWp/Y0XJO4aEukFqyQqdCjhhA==}
     engines: {node: ^20.19.0 || >=22.13.0}
     hasBin: true
 
@@ -1783,7 +1783,7 @@ snapshots:
 
   parse-srcset@1.0.2: {}
 
-  parseman@0.55.3:
+  parseman@0.56.0:
     dependencies:
       linecraft: 0.2.6
       magic-string: 0.30.21
