@@ -26,6 +26,9 @@ const optionsFor = syntax => ({ syntax });
 const median = values => { const sorted = [...values].sort((a, b) => a - b), middle = sorted.length >> 1; return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
 const quantile = (values, q) => { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]; };
 
+// A list's recorded item ranges extend a block's source entry; the first five
+// fields of each entry are what every version records.
+const comparable = document => Array.isArray(document.source?.blocks) ? { ...document, source: { ...document.source, blocks: document.source.blocks.map(entry => entry.slice(0, 5)) } } : document;
 function passes(parse, documents, options) {
   return () => { let last; for (const source of documents) { try { last = parse(source, options); } catch { /* reported with the outputs */ } } return last; };
 }
@@ -37,7 +40,7 @@ if (process.argv[2] === "--time") {
   const documents = await inputSet(setName), options = optionsFor(syntax);
   const { parse } = await import(entry);
   const outputs = hashes === "hashes" ? documents.map(source => {
-    try { return createHash("sha1").update(JSON.stringify(parse(source, options))).digest("hex"); }
+    try { return createHash("sha1").update(JSON.stringify(comparable(parse(source, options)))).digest("hex"); }
     catch (error) { return `threw: ${error instanceof Error ? error.message : String(error)}`; }
   }) : undefined;
   const run = passes(parse, documents, options);

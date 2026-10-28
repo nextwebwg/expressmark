@@ -653,7 +653,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   function exactly(generatedHead: string, metadata: Record<string,unknown>): string | undefined {
     const recorded=document.source;
     if(typeof recorded?.text !== "string" || !Array.isArray(recorded.blocks)) return;
-    const text=recorded.text, blocks=recorded.blocks as [number,string,number,number,number,(string | [string,number,number])[]?][];
+    const text=recorded.text, blocks=recorded.blocks as [number,string,number,number,number,(string | number)[]?][];
     const trusted=recorded.trusted === true && options.trustedHtml === true;
     // The safe profile writes recorded source only where it holds no HTML: a
     // block without HTML, and spacing that is only whitespace.
@@ -708,20 +708,22 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     // written from its source, and any other item is written fresh with the
     // list's markers.
     // The result is kept only when it reads back as the list.
-    function listItems(list: Node, recordedItems: (string | [string,number,number])[]): string | undefined {
-      const [shell,...parts]=recordedItems as [string,...[string,number,number][]];
-      if(contentHash({...list,children:[]}) !== shell) return;
+    function listItems(list: Node, recordedItems: (string | number)[]): string | undefined {
+      if(contentHash({...list,children:[]}) !== recordedItems[0]) return;
+      // Each recorded item: its hash, then its source range.
+      const count=(recordedItems.length-1)/3;
+      const hash=(part: number)=>recordedItems[1+part*3], from=(part: number)=>recordedItems[2+part*3] as number, to=(part: number)=>recordedItems[3+part*3] as number;
       const children=list.children ?? [], each=contentHashes(children);
       const same=list.ordered && spelling(list,"numbering") === "same";
-      let written="", next=0, previous=-2;
+      let written="", next=0, previous=-1;
       for(const [index,item] of children.entries()) {
         let found=-1;
-        for(let part=next;part<Math.min(parts.length,next+64);part++) if(parts[part]![0] === each[index]) { found=part; break; }
-        const value=found >= 0 ? text.slice(parts[found]![1],parts[found]![2]) : lines(block({...list,children:[item],start:(list.start ?? 1)+(same ? 0:index)}));
+        for(let part=next;part<Math.min(count,next+64);part++) if(hash(part) === each[index]) { found=part; break; }
+        const value=found >= 0 ? text.slice(from(found),to(found)) : lines(block({...list,children:[item],start:(list.start ?? 1)+(same ? 0:index)}));
         // Between items, the source's spacing where a recorded item borders the
         // gap: an item edited in place keeps the spacing around it.
-        const gap=(after: number)=>text.slice(parts[after]![2],parts[after+1]![1]);
-        if(index > 0) written+=previous >= 0 && previous+1 < parts.length ? gap(previous) : found > 0 ? gap(found-1) : lines(list.tight ? "\n":"\n\n");
+        const gap=(after: number)=>text.slice(to(after),from(after+1));
+        if(index > 0) written+=previous >= 0 && previous+1 < count ? gap(previous) : found > 0 ? gap(found-1) : lines(list.tight ? "\n":"\n\n");
         written+=value;
         previous=found;
         if(found >= 0) next=found+1;

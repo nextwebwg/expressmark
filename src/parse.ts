@@ -1154,13 +1154,14 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
   }
   if(options.onDiagnostic) diagnoseIds(document,options);
   if(options.lint) lint(document,positions,options);
-  recordSource(document,markdown,positions,itemLines,lineOffset,frontmatterValid,options);
+  recordSource(document,markdown,positions,itemLines,lineOffset,frontmatterValid,options,keep);
   if(!keep) return {document};
   return {document,session:{markdown,source,front:front?.[0] ?? "",tops:restartable ? tops : undefined,references:env.references as Session["references"],footnotes:[...footnotes],positions,itemLines}};
 }
 
-// A node's hash as its source record holds it. A parse hashes the nodes it
-// made once; an edit's parse reuses the hashes of the nodes it reuses.
+// A node's hash as its source record holds it. A document parsed for editing
+// hashes the nodes it made once, and an edit reuses the hashes of the nodes it
+// reuses.
 const hashes=new WeakMap<Node,string>();
 function recordedHash(node: Node): string {
   let hash=hashes.get(node);
@@ -1176,14 +1177,15 @@ function recordedHash(node: Node): string {
  * list also records each item's range and hash, with a hash of the list apart
  * from its items, so a writer replays the items an edit leaves alone.
  */
-function recordSource(document: Document, text: string, positions: WeakMap<Node,Position>, itemLines: WeakMap<Node,[number,number][]>, headLines: number, head: boolean, options: ConversionOptions): void {
+function recordSource(document: Document, text: string, positions: WeakMap<Node,Position>, itemLines: WeakMap<Node,[number,number][]>, headLines: number, head: boolean, options: ConversionOptions, keep: boolean): void {
+  const hashOf=keep ? recordedHash : contentHash;
   const starts=[0], ends: number[]=[];
   if(text.includes("\r")) for(let index=0;index<text.length;index++) {
     const code=text.charCodeAt(index);
     if(code === 10 || code === 13) { ends.push(index); if(code === 13 && text.charCodeAt(index+1) === 10) index++; starts.push(index+1); }
   } else for(let index=text.indexOf("\n");index >= 0;index=text.indexOf("\n",index+1)) { ends.push(index); starts.push(index+1); }
   ends.push(text.length);
-  const hashes=document.body.map(recordedHash);
+  const hashes=document.body.map(hashOf);
   // Where tags appear, which marks blocks holding HTML the safe profile may filter.
   const tags: number[]=[];
   for(const match of text.matchAll(/<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])|<!--|<\?|<![A-Za-z]/g)) tags.push(match.index);
@@ -1195,8 +1197,9 @@ function recordSource(document: Document, text: string, positions: WeakMap<Node,
     return inner.length && inner.every(Boolean) ? [inner[0]![0],inner.at(-1)![1]] : undefined;
   };
   // Each entry: block count, hash, source range, 1 when its source holds HTML,
-  // and for one list, its items' parts.
-  const blocks: ([number,string,number,number,number] | [number,string,number,number,number,(string | [string,number,number])[]])[]=[];
+  // and for one list, the list's hash apart from its items followed by each
+  // item's hash and source range.
+  const blocks: ([number,string,number,number,number] | [number,string,number,number,number,(string | number)[]])[]=[];
   // A line range's offsets, without the blank lines that end it.
   const offsets=(from: number, to: number): [number,number] => {
     while(to-1>from && !text.slice(starts[to-1],ends[to-1]).trim()) to--;
@@ -1212,8 +1215,8 @@ function recordSource(document: Document, text: string, positions: WeakMap<Node,
     const html=tag<tags.length && tags[tag]!<to ? 1:0;
     const node=document.body[group.at]!, items=group.count === 1 ? itemLines.get(node) : undefined;
     if(items && items.every(([first,last])=>last>first && last<=ends.length)) {
-      const parts: (string | [string,number,number])[]=[contentHash({...node,children:[]})];
-      node.children!.forEach((item,index)=>parts.push([recordedHash(item),...offsets(items[index]![0],items[index]![1])]));
+      const parts: (string | number)[]=[contentHash({...node,children:[]})];
+      node.children!.forEach((item,index)=>parts.push(hashOf(item),...offsets(items[index]![0],items[index]![1])));
       blocks.push([group.count,hashes[group.at]!,from,to,html,parts]);
     } else blocks.push([group.count,hashes.slice(group.at,group.at+group.count).join("+"),from,to,html]);
   };
