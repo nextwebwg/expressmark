@@ -34,6 +34,8 @@ export class StateBlock {
   /** The container run being collected; see `readRun`. */
   run: Run = { start: 0, line: 0, at: -1, endLine: 0, firstEnd: 0, lastEmpty: false, terminated: false, read: () => {} };
   context: ParseContext | undefined;
+  /** A top-level line where reading stops, for reading part of a document. */
+  stop: ((line: number) => boolean) | undefined;
   constructor(src: string, md: Engine, env: Env, tokens: Token[]) {
     this.src = src; this.md = md; this.env = env; this.tokens = tokens;
     let start = 0, indent = 0, offset = 0, indented = true;
@@ -717,6 +719,7 @@ export class ParserBlock {
     while (line < endLine) {
       state.line = line = state.skipEmptyLines(line);
       if (line >= endLine || state.sCount[line]! < state.blkIndent) break;
+      if (state.stop !== undefined && state.level === 0 && state.stop(line)) break;
       // Deep nesting reads the rest as nothing rather than overflowing the stack.
       if (state.level >= maxNesting) { state.line = endLine; break; }
       const prevLine = state.line;
@@ -733,9 +736,10 @@ export class ParserBlock {
       if (line < endLine && state.isEmpty(line)) { hasEmptyLines = true; state.line = ++line; }
     }
   }
-  parse(src: string, md: Engine, env: Env, tokens: Token[]): void {
+  parse(src: string, md: Engine, env: Env, tokens: Token[], stop?: (line: number) => boolean): void {
     if (!src) return;
     const state = new StateBlock(src, md, env, tokens);
+    state.stop = stop;
     this.tokenize(state, state.line, state.lineMax);
   }
 }

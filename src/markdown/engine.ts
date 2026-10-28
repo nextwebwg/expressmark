@@ -37,13 +37,15 @@ export interface EngineOptions { html: boolean; linkify: boolean; maxNesting: nu
 class StateCore {
   tokens: Token[] = [];
   inlineMode = false;
+  /** A top-level line where the block pass stops, for reading part of a document. */
+  stop: ((line: number) => boolean) | undefined;
   constructor(public src: string, public md: Engine, public env: Env) {}
 }
 type CoreRule = (state: StateCore) => void;
 
 const normalize: CoreRule = state => { state.src = state.src.replace(/\r\n?/g, "\n").replace(/\0/g, "�"); };
 const block: CoreRule = state => {
-  if (!state.inlineMode) { state.md.block.parse(state.src, state.md, state.env, state.tokens); return; }
+  if (!state.inlineMode) { state.md.block.parse(state.src, state.md, state.env, state.tokens, state.stop); return; }
   const token = new Token("inline", "", 0);
   token.content = state.src; token.map = [0, 1]; token.children = [];
   state.tokens.push(token);
@@ -168,8 +170,10 @@ export class Engine {
     if (missed.length) throw new Error(`Failed to enable unknown rule(s): ${missed.join(", ")}`);
     return this;
   }
-  parse(src: string, env: Env): Token[] {
+  /** Read `src`; with `stop`, up to the first top-level block whose line `stop` accepts. */
+  parse(src: string, env: Env, stop?: (line: number) => boolean): Token[] {
     const state = new StateCore(src, this, env);
+    state.stop = stop;
     for (const rule of this.core.ruler.getRules("")) rule(state);
     return state.tokens;
   }

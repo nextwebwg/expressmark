@@ -59,7 +59,7 @@ such as “fastest Markdown parser” require a defined comparison set, equivale
 work, representative inputs, and repeatable results; a single microbenchmark
 cannot establish them.
 
-## The Parseman reader and what remains open
+## The Parseman reader
 
 The boundary is explicit. Parseman grammars recognize what starts at a position:
 fences, ATX headings, thematic breaks, list markers, setext underlines, table
@@ -78,6 +78,13 @@ any earlier checkout.
 
 The reader runs the grammars through Parseman's interpreter, which constructs no
 code at runtime and so runs under a strict Content Security Policy.
+
+`parseDoc` re-reads an edit from the top-level block before it: a top-level
+block's reading depends on its own lines and the line after them, and the
+reader's state is empty between top-level blocks. Reading stops at the first
+block after the edit that starts where a block started before. Definitions,
+frontmatter and, in `standard` syntax, HTML tags have effects across blocks, so
+edits touching them re-read the whole document.
 
 Any change here keeps the public AST and converter contracts stable unless the
 owner approves a change.

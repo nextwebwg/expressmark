@@ -29,6 +29,21 @@ describe("exact round trips", () => {
     document.body[0] = { type: "heading", level: 1, value: "Renamed" };
     expect(stringify(document)).toBe("# Renamed\n\n*  one\n*  two\n\n\nLast  line.");
   });
+  it.each(["compatible", "standard"] as const)("rewrites only the edited item of a %s list", syntax => {
+    const source = "Intro\n\n*   first  item\n*   second *item*\n\n    more\n*   third\n";
+    const document = parse(source, { syntax });
+    document.body[1]!.children![1]!.body![0]!.children![1] = { type: "strong", value: "item" };
+    expect(stringify(document, { syntax })).toBe("Intro\n\n*   first  item\n* second **item**\n\n  more\n*   third\n");
+    const added = parse(source, { syntax });
+    added.body[1]!.children!.push({ type: "listItem", body: [{ type: "paragraph", value: "fourth" }] });
+    // A blank line inside an item loosens a `compatible` list, so its items stand apart.
+    expect(stringify(added, { syntax })).toBe(`${source}${syntax === "compatible" ? "\n" : ""}* fourth\n`);
+  });
+  it.each(["compatible", "standard"] as const)("rewrites only the edited cell of a %s pipe table", syntax => {
+    const document = parse("|  Name | Value  |\n|:------|------:|\n|  alpha | 1 |\n| beta   |  2 |\n", { syntax });
+    document.body[0]!.children![2]!.children![1]!.value = "a|b";
+    expect(stringify(document, { syntax })).toBe("|  Name | Value  |\n|:------|------:|\n|  alpha | 1 |\n| beta   |  a\\|b |\n");
+  });
   it("keeps the source's spacing around inserted and removed blocks", () => {
     const document = parse("A\n\n\n\nB\n\nC");
     document.body.splice(1, 1);
