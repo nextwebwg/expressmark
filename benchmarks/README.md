@@ -58,14 +58,16 @@ and a README corpus read from `BENCH_READMES` (default `work/readmes/`).
 `readme-corpus.txt` lists the 400 public repositories the 398-file corpus came
 from; their READMEs are third-party text and stay out of the repository.
 
-For each input set and syntax, one child process imports both builds and runs
-them in alternating order, base then candidate, then candidate then base, for
-`BENCH_ROUNDS` rounds (default 15). Each run repeats whole passes over the set
-for at least `BENCH_DURATION_MS` (default 200), after a `BENCH_WARMUP_MS`
-warmup (default 500). The report gives each side's median, quartiles and
-range, the overall ratio of medians, and the per-round ratios. Memory is
+For each input set and syntax, every round runs one child process per
+checkout, base then candidate (A B A B …), for `BENCH_ROUNDS` rounds (default
+21), so the builds never share a process, heap or JIT. Each process warms up
+for `BENCH_WARMUP_MS` (default 500), then repeats whole passes over the set for
+at least `BENCH_DURATION_MS` (default 200) and reports the mean pass time. The
+report gives each side's median, quartiles and range, the overall ratio of medians, and the per-round ratios. Memory is
 measured in one child process per build: the heap one pass's documents keep
-alive, and the highest heap a pass reaches. The runner also hashes every parsed
+alive, and the highest heap a pass reaches. Where the collector runs depends on
+the order of the documents, so the peak is the median over `BENCH_PEAK_ORDERS`
+passes (default 5) in fixed shuffled orders. The runner also hashes every parsed
 document and reports how many differ between the builds. It warns when the
 one-minute load average is above 3; run it on an idle machine.
 

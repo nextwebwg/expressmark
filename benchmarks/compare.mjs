@@ -3,9 +3,9 @@
 // whether their outputs agree.
 // Usage: node benchmarks/compare.mjs --base=<path-or-git-ref> [--candidate=<path>] > results.json
 //
-// Timing for one input set and syntax runs in one child process that imports
-// both builds and alternates them, base first then candidate first (A B B A),
-// for every round. Memory runs in one child process per build.
+// Each round runs one child process per checkout, base then candidate (A B A B
+// …), so neither build shares a process, a heap or a JIT with the other, and
+// both see the same machine load. Memory runs in one child process per build.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -16,9 +16,10 @@ import { checkouts } from "./checkout.mjs";
 import { digest, inputSet, setNames } from "./corpus.mjs";
 
 const list = (value, all) => value ? value.split(",").map(item => item.trim()).filter(Boolean) : all;
-const rounds = Number(process.env.BENCH_ROUNDS ?? 15);
+const rounds = Number(process.env.BENCH_ROUNDS ?? 21);
 const durationMs = Number(process.env.BENCH_DURATION_MS ?? 200);
 const warmupMs = Number(process.env.BENCH_WARMUP_MS ?? 500);
+const peakOrders = Number(process.env.BENCH_PEAK_ORDERS ?? 5);
 assert(Number.isInteger(rounds) && rounds >= 4, "BENCH_ROUNDS must be an integer >= 4");
 assert(durationMs >= 10 && warmupMs >= 0, "BENCH_DURATION_MS must be >= 10");
 const optionsFor = syntax => ({ syntax });
@@ -32,20 +33,16 @@ let sink;
 const timed = (pass, milliseconds) => { let count = 0; const start = performance.now(); do { sink = pass(); count++; } while (performance.now() - start < milliseconds); return (performance.now() - start) / count; };
 
 if (process.argv[2] === "--time") {
-  const [, , , setName, syntax, ...entries] = process.argv;
+  const [, , , setName, syntax, entry, hashes] = process.argv;
   const documents = await inputSet(setName), options = optionsFor(syntax);
-  const legs = await Promise.all(entries.map(async entry => (await import(entry)).parse));
-  const outputs = legs.map(parse => documents.map(source => {
+  const { parse } = await import(entry);
+  const outputs = hashes === "hashes" ? documents.map(source => {
     try { return createHash("sha1").update(JSON.stringify(parse(source, options))).digest("hex"); }
     catch (error) { return `threw: ${error instanceof Error ? error.message : String(error)}`; }
-  }));
-  const runs = legs.map(parse => passes(parse, documents, options));
-  for (const run of runs) timed(run, warmupMs);
-  const ms = legs.map(() => []);
-  for (let round = 0; round < rounds; round++) {
-    const order = round % 2 ? [1, 0] : [0, 1];
-    for (const leg of order) ms[leg].push(timed(runs[leg], durationMs));
-  }
+  }) : undefined;
+  const run = passes(parse, documents, options);
+  timed(run, warmupMs);
+  const ms = timed(run, durationMs);
   assert(sink !== undefined || documents.length === 0);
   console.log(JSON.stringify({ documents: documents.length, bytes: documents.reduce((sum, source) => sum + Buffer.byteLength(source), 0), inputSha256: digest(documents), ms, outputs }));
   process.exit(0);
@@ -61,10 +58,20 @@ if (process.argv[2] === "--memory") {
   const holding = collect();
   kept = undefined;
   const retained = holding - collect();
-  // Peak: the highest heap one pass reaches above a collected baseline.
-  const base = collect(); let peak = 0;
-  for (const source of documents) { try { parse(source, options); } catch { /* reported with the outputs */ } peak = Math.max(peak, process.memoryUsage().heapUsed - base); }
-  console.log(JSON.stringify({ retainedBytes: retained, peakBytes: peak, released: kept === undefined }));
+  // Peak: the highest heap one pass reaches above a collected baseline. Where
+  // the collector runs depends on the order of the documents, so the peak is the
+  // median over passes in several fixed shuffled orders.
+  const peaks = [];
+  for (let seed = 1; seed <= peakOrders; seed++) {
+    let x = seed;
+    const random = () => ((x = Math.imul(x ^ (x >>> 15), 0x2c1b3c6d) + 0x9e3779b9 | 0) >>> 0) / 4294967296;
+    const order = documents.map(source => [random(), source]).sort((a, b) => a[0] - b[0]).map(([, source]) => source);
+    const base = collect(); let peak = 0;
+    for (const source of order) { try { parse(source, options); } catch { /* reported with the outputs */ } peak = Math.max(peak, process.memoryUsage().heapUsed - base); }
+    peaks.push(peak);
+  }
+  const peak = median(peaks);
+  console.log(JSON.stringify({ retainedBytes: retained, peakBytes: peak, peaksBytes: peaks, released: kept === undefined }));
   process.exit(0);
 }
 
@@ -80,9 +87,16 @@ const child = (...args) => {
 };
 const results = [];
 for (const set of list(process.env.BENCH_SETS, setNames)) for (const syntax of list(process.env.BENCH_SYNTAXES, ["compatible", "standard"])) {
-  const timing = child("--time", set, syntax, ...legs.map(leg => leg.entry));
+  const ms = legs.map(() => []);
+  let first;
+  for (let round = 0; round < rounds; round++) {
+    const sides = legs.map(leg => child("--time", set, syntax, leg.entry, round === 0 ? "hashes" : ""));
+    first ??= sides;
+    sides.forEach((side, leg) => ms[leg].push(side.ms));
+  }
+  const timing = { ...first[0], outputs: first.map(side => side.outputs) };
   const memory = legs.map(leg => child("--memory", set, syntax, leg.entry));
-  const [base, candidate] = timing.ms;
+  const [base, candidate] = ms;
   const ratios = candidate.map((ms, round) => ms / base[round]);
   const differing = timing.outputs[1].flatMap((output, index) => output === timing.outputs[0][index] ? [] : [index]);
   const summary = (ms, leg) => ({ medianMs: median(ms), minMs: Math.min(...ms), maxMs: Math.max(...ms), q1Ms: quantile(ms, 0.25), q3Ms: quantile(ms, 0.75), roundsMs: ms,
@@ -95,6 +109,6 @@ for (const set of list(process.env.BENCH_SETS, setNames)) for (const syntax of l
 }
 console.log(JSON.stringify({ schema: "compare", schemaVersion: 2, measuredAt: new Date().toISOString(),
   environment: { node: process.version, platform: platform(), arch: arch(), cpu: cpus()[0]?.model, cores: cpus().length, loadAverage: load, loadAverageAfter: loadavg() },
-  legs, protocol: { rounds, durationMs, warmupMs, order: "A B, then B A, alternating per round, in one process per input set and syntax", aggregation: "median ms per pass over the whole set; ratio = candidate / base",
-    memory: "one process per build; retained: heap one pass's documents keep alive; peak: highest heap above a collected baseline during one pass" },
+  legs, protocol: { rounds, durationMs, warmupMs, order: "A B A B: each round runs one child process per checkout, base then candidate", aggregation: "median ms per pass over the whole set; ratio = candidate / base",
+    memory: "one process per build; retained: heap one pass's documents keep alive; peak: median over BENCH_PEAK_ORDERS passes in fixed shuffled orders of the highest heap above a collected baseline" },
   results }, null, 2));
