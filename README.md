@@ -131,6 +131,8 @@ rendering is available from 0.1.2.
   were written and rendered as one numbered, back-linked notes section.
 - Reference-style links and images with their `[label]: url` definitions, kept
   in their authored form and resolved when rendering.
+- Definition lists: a one-line term, then `: ` descriptions holding blocks,
+  rendered as `<dl>`, `<dt>` and `<dd>`.
 - Adjacent tab grouping and explicit tabs settings, including shared selection names.
 - Leading-pipe line blocks, code captions and presentation attributes.
 - Named and positional list tables, including rich cells, headers, alignment, transpose and rectangular merges.
@@ -175,7 +177,10 @@ block's nodes. An edit that changes the frontmatter or touches a link or
 footnote definition re-reads the whole document, as does every edit with `lint`
 or `onDiagnostic`, whose findings span the document, and every edit of text
 holding a carriage return. In `standard` syntax, an edit touching an HTML tag
-re-reads the whole document, since an element reads through its end tag.
+re-reads the whole document, since an element reads through its end tag. A
+definition list continues past blank lines into a later term, so an edit
+re-reads from a definition list directly before the edited block, and reading
+continues through a definition list after it.
 Treat a document as read-only while you edit it.
 
 ```ts

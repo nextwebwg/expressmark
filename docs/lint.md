@@ -51,7 +51,8 @@ Without `preferredForms`, `stringify` writes each authored spelling back.
 | `prefer-named-table` | A pipe table or positional list rows | a `::: table` with named fields |
 | `prefer-bracketed-mention` | A bare `@handle` | `@[label]` |
 | `prefer-canonical-line-block` | Line-block marker spacing or continuation lines | `\| ` lines |
-| `mixed-indentation` | A list mixing tabs and spaces, in `compatible` (always reported in `standard`) | one kind of indentation |
+| `prefer-canonical-definition-list` | Definition-list marker spacing or indentation, continuation indentation, or blank lines between terms | a term line, `: ` descriptions with two-space continuation, one blank line before each later term |
+| `mixed-indentation` | A list mixing tabs and spaces, in `compatible` (always reported in `standard`, and for a description in both) | one kind of indentation |
 | `br-end-tag` | `</br>`, read as `<br>` | `<br>` |
 | `table-code-pipe` | `\|` inside a table cell's code span, in `compatible`; `standard` keeps the backslash | `\|` written as `|` inside the code span |
 

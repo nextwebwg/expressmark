@@ -32,6 +32,7 @@ describe("lint rules", () => {
     ["prefer-named-table", "| A | B |\n| --- | --- |\n| 1 | 2 |", "::: table\n\n- A: 1\n  B: 2\n\n:::\n"],
     ["prefer-bracketed-mention", "Thanks @ada", "Thanks @[ada]\n"],
     ["prefer-canonical-line-block", "|   one\n|   two", "| one\n| two\n"],
+    ["prefer-canonical-definition-list", "Term\n:   one\n    more\n\n\nNext\n  : two", "Term\n: one\n  more\n\nNext\n: two\n"],
   ])("%s", (code, source, written) => {
     const found = warnings(source).filter(diagnostic => diagnostic.code === code);
     expect(found).toHaveLength(found.length || 1);

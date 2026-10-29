@@ -78,12 +78,20 @@ function readers(standard: ReadonlySet<StandardRule>): Readers {
   md.inline.ruler.after("link","bracketed_span",inlineHook("bracketed_span"));
   md.inline.ruler.before("link","footnote_reference",inlineHook("footnote_reference"));
   md.block.ruler.before("fence","expressive_container",blockHook("expressive_container"),{alt:blocks});
-  md.block.ruler.before("paragraph","expressive_leaf",blockHook("expressive_leaf"),{alt:blocks});
-  md.block.ruler.before("paragraph","expressive_line_block",blockHook("expressive_line_block"),{alt:blocks});
+  md.block.ruler.before("definition_list","expressive_leaf",blockHook("expressive_leaf"),{alt:blocks});
+  md.block.ruler.before("definition_list","expressive_line_block",blockHook("expressive_line_block"),{alt:blocks});
+  // An alert's marker line heads its quote, so it is never a term.
+  const definitionList=md.block.ruler.get("definition_list").fn;
+  md.block.ruler.at("definition_list",(state,start,end,silent)=>!alertLine(state,start) && definitionList(state,start,end,silent));
   if(standard.size) installStandard(md,lexicalMd,standard);
   const built={md,lexicalMd,originals};
   readerCache.set(key,built);
   return built;
+}
+function alertLine(state: StateBlock, start: number): boolean {
+  if(state.tokens.at(-1)?.type !== "blockquote_open") return false;
+  const marker=alertMarker.exec(line(state,start));
+  return marker !== null && !structuralTypes.has(marker[1]!.toLowerCase());
 }
 /** A top-level block: its source lines, after any frontmatter, and the nodes it made. */
 interface Top { start: number; end: number; nodes: Node[]; definitions?: boolean }
@@ -123,7 +131,9 @@ export interface MarkdownDoc {
  * Parse `markdown` for editing. Each edit re-reads from the top-level block
  * before it until the blocks after it start where they started before, and
  * reuses every other block's nodes; its document equals `parse` of the edited
- * text. An edit re-reads the whole document when it changes the frontmatter or
+ * text. A definition list continues past blank lines into a later term, so a
+ * re-read starts at a definition list directly before the edited block and
+ * continues through one after it. An edit re-reads the whole document when it changes the frontmatter or
  * the link and footnote definitions, when the text holds a carriage return or
  * a byte order mark, and with `lint` or `onDiagnostic`, whose findings span
  * the document.
@@ -703,11 +713,15 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
         }
         if(options.lint || depth === 1) place(nodes,made.at,made.map);
       };
+      // The previous block is a one-line paragraph, for the unattached-marker warning.
+      let oneLine=false;
       while(cursor<tokens.length) {
         finish();
         const token=tokens[cursor++]!;
         if(token.type === until) break;
         made={at:nodes.length,map:token.map};
+        const afterOneLine=oneLine;
+        oneLine=token.type === "paragraph_open" && !!token.map && token.map[1] === token.map[0]+1;
         if(token.type === "paragraph_open" || token.type === "heading_open") {
           const inner=tokens[cursor++]!;
           let content=inner.content;
@@ -740,7 +754,12 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
               if(closing) spell(node,"closing",closing[1]!);
             }
           }
-          if(token.type === "paragraph_open") { const task=/^\[([ xX])\][ \t]+/.exec(content); if(task) tasks.set(node,task); }
+          if(token.type === "paragraph_open") {
+            const task=/^\[([ xX])\][ \t]+/.exec(content); if(task) tasks.set(node,task);
+            // A `:` or `~` line that reads as text, where an author may have meant a description.
+            if(options.onDiagnostic && (/\n[ \t]*[:~](?:[ \t\n]|$)/.test(content) || afterOneLine && /^[:~](?:[ \t\n]|$)/.test(content)))
+              warn(options,"unattached-definition-marker","A line starting with : or ~ is paragraph text here. A description's : line directly follows its one-line term.");
+          }
           cursor++; nodes.push(node);
         } else if(token.type === "blockquote_open") {
           // A marker opening the quote's first line makes it an alert: the same
@@ -899,6 +918,18 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
           defined.add(label);
           nodes.push({type:"footnoteDefinition",label,body:read("footnote_close")});
         }
+        else if(token.type === "dl_open") {
+          const node: Node={type:"definitionList",children:read("dl_close")};
+          const source=tokens[cursor-1]!.meta as {preferred:boolean;chunks:string[]};
+          if(!source.preferred) spell(node,"markdown",source.chunks.join("\n"));
+          nodes.push(node);
+        } else if(token.type === "dt_open") { nodes.push(compact({type:"definitionTerm"},inlineTokens(tokens[cursor]!.children!))); cursor+=2; }
+        else if(token.type === "dd_open") {
+          if(token.meta?.mixed) warn(options,"mixed-indentation","A description mixes tabs and spaces in its indentation; tabs count to the next multiple of four columns.");
+          const node: Node={type:"definitionDescription",body:read("dd_close")};
+          if(token.meta?.loose) node.tight=false;
+          nodes.push(node);
+        }
         else if(token.type === "stray_fence") nodes.push({type:"strayFence",value:token.content});
         else if(token.type === "expressive_literal") nodes.push({type:"literal",display:"block",value:token.content});
         else if(token.type === "expressive_line_block") {
@@ -1044,6 +1075,9 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     const old=session.tops;
     let first=old.findIndex(top=>top.end >= editLine);
     if(first<0) first=old.length;
+    // A definition list continues, past blank lines, into the term that
+    // follows it, so a re-read block may join the list before it.
+    if(first>0 && old[first-1]!.nodes.at(-1)?.type === "definitionList") first--;
     const restart=Math.min(first<old.length ? old[first]!.start : editLine,editLine);
     let offset=0;
     for(let line=0;line<restart;line++) offset=source.indexOf("\n",offset)+1;
@@ -1055,7 +1089,8 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     const stop=(line: number)=>{
       const at=restart+line;
       const index=at>newLast ? starts.get(at-delta) : undefined;
-      if(index === undefined) return false;
+      // A definition list there may continue one the reading ends with.
+      if(index === undefined || old[index]!.nodes[0]?.type === "definitionList") return false;
       resume=index; stopped=at; return true;
     };
     // Reading usually stops within a few blocks of the edit, so the first read
