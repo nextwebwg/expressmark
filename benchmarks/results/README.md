@@ -37,6 +37,15 @@ with 0.3.0 and 144–181 MB with 0.4.0. One pass over that corpus allocates
 corpus holds 44.07 MB of parsed documents with 0.3.0 and 44.47 MB with 0.4.0,
 the difference being each top-level list's recorded item ranges.
 
+Peak follows allocation and collector timing, so it overstates the heap a
+build needs. The smallest `--max-old-space-size` under which three passes over
+the README corpus complete, found by bisection to 2 MB:
+
+| Syntax | Documents discarded, 0.3.0 → 0.4.0 | All documents kept, 0.3.0 → 0.4.0 |
+| --- | ---: | ---: |
+| `compatible` | 49 → 47 MB | 108 → 110 MB |
+| `standard` | 49 → 47 MB | 112 → 114 MB |
+
 `incremental.mjs` timed a one-character edit at nine positions in prose lines
 of the corpus's largest README (426,115 bytes, 4,161 lines), 21 rounds, full
 parse and edit alternating order per round:

@@ -19,10 +19,9 @@
 - Write an edited top-level list item by item and an edited pipe table cell by
   cell: the items and cells an edit leaves alone keep their source.
 - Parse in 0.93–1.08× of 0.3.0's time on the example sets and 1.02× and 1.06×
-  on the README corpus. The peak heap a pass reaches is the median over five
-  document orders, since it moves with where the collector runs: 147 and
-  175 MB on the README corpus, against 125 and 142 MB for 0.3.0, allocating 4%
-  more per pass.
+  on the README corpus, in the same heap: a pass over the README corpus runs
+  under a 47 MB old-space limit (0.3.0: 49 MB), and keeping all 397 parsed
+  documents needs 110–114 MB (0.3.0: 108–112 MB).
 - Benchmark each checkout in its own process per round, alternating base and
   candidate.
 
