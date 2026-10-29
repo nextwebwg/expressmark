@@ -52,6 +52,13 @@ describe("exact round trips", () => {
     inserted.body.splice(1, 0, { type: "paragraph", value: "New" });
     expect(stringify(inserted)).toBe("A\n\nNew\n\nB");
   });
+  it("ends an edited document as its source ended", () => {
+    for (const ending of ["", "\n", "\n\n"]) {
+      const document = parse(`A\n\n::: note\nB\n:::${ending}`);
+      document.body[1]!.body![0]!.value = "C";
+      expect(stringify(document)).toBe(`A\n\n::: note\nC\n:::${ending}`);
+    }
+  });
   it("writes fresh blocks with the document's own line endings", () => {
     const document = parse("A\r\n\r\nB\r\n");
     document.body[1] = { type: "paragraph", value: "C" };

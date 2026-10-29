@@ -18,6 +18,8 @@
   [the measurements](benchmarks/results/README.md).
 - Write an edited top-level list item by item and an edited pipe table cell by
   cell: the items and cells an edit leaves alone keep their source.
+- End an edited document as its source ended, with its final line ending or
+  none, so editing the last block leaves the end of the file alone.
 - Parse in 0.93–1.08× of 0.3.0's time on the example sets and 1.02× and 1.06×
   on the README corpus, in the same heap: a pass over the README corpus runs
   under a 47 MB old-space limit (0.3.0: 49 MB), and keeping all 397 parsed

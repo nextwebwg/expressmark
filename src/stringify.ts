@@ -702,7 +702,10 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       index++;
     }
     if(end !== undefined && used === blocks.length-1 && replay(text.slice(end))) return output+text.slice(end);
-    return output ? output+newline : "";
+    // The document ends as its source ended: the whitespace after its last
+    // recorded block, a final line ending or none.
+    const ending=blocks.length ? text.slice(blocks.at(-1)![3]) : newline;
+    return output ? output+(ending.trim() ? newline : ending) : "";
 
     // A list written item by item: an item that still hashes as recorded is
     // written from its source, and any other item is written fresh with the
