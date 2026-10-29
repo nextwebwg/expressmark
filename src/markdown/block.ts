@@ -7,6 +7,7 @@ import { Token } from "./token.js";
 import { asciiTrim, isSpace, normalizeReference } from "./utils.js";
 import { atxHeading, bulletMarker, fenceClose, fenceOpen, htmlBlockStart, match, orderedMarker, reach, setextUnderline, tableCells, tableDelimiterRow, thematicBreak } from "./lexicon.js";
 import { parseLinkDestination, parseLinkTitle } from "./links.js";
+import { lines, type Combinator, type ParseContext } from "parseman";
 import type { Engine } from "./engine.js";
 
 export type BlockRule = (state: StateBlock, startLine: number, endLine: number, silent: boolean) => boolean;
@@ -30,6 +31,11 @@ export class StateBlock {
   listIndent = -1;
   parentType = "root";
   level = 0;
+  /** The container run being collected; see `readRun`. */
+  run: Run = { start: 0, line: 0, at: -1, endLine: 0, firstEnd: 0, lastEmpty: false, terminated: false, read: () => {} };
+  context: ParseContext | undefined;
+  /** A top-level line where reading stops, for reading part of a document. */
+  stop: ((line: number) => boolean) | undefined;
   constructor(src: string, md: Engine, env: Env, tokens: Token[]) {
     this.src = src; this.md = md; this.env = env; this.tokens = tokens;
     let start = 0, indent = 0, offset = 0, indented = true;
@@ -408,79 +414,176 @@ const reference: BlockRule = (state, startLine, _endLine, silent) => {
 };
 
 // ---- Container blocks
+//
+// A block quote and a list item each read a run of lines through Parseman's
+// `lines()`. A line joins the run when its prefix matches (a quote's `>`, an
+// item's indentation) or, failing that, lazily. The prefix checks read the line
+// arrays, which hold the enclosing containers' narrowing, so every run reads the
+// document itself rather than its parent's text. The run's body narrows the
+// arrays over the run's lines and reads them as blocks; the run ends after the
+// lines the blocks consumed.
+
+/**
+ * The container run being collected. Probes run line by line, each line's
+ * prefix check first, and all of a run's probes finish before its body runs, so
+ * one record per reader state serves every nesting depth.
+ */
+type Run = {
+  start: number; endLine: number;
+  /** The line the probes are on and its start in the source. */
+  line: number; at: number;
+  /** Where an item's marker ends on its first line. */
+  firstEnd: number;
+  /** The last quote line held nothing after its marker. */
+  lastEmpty: boolean;
+  /** The run ended at a line that starts another block. */
+  terminated: boolean;
+  /** Read the run's blocks, from `start` up to `end`. */
+  read: (end: number) => void;
+};
+
+const anywhere = { firstSet: { kind: "any" as const }, canMatchNewline: false, isTrivia: false };
+
+/** A prefix or lazy check: `test` returns where the line's prefix ends, or -1. */
+function lineCheck(name: string, test: (state: StateBlock, line: number, pos: number) => number): Combinator<null> {
+  const expected = [name];
+  return {
+    _tag: name, _meta: anywhere, _def: { tag: "unknown" },
+    parse(_input: string, pos: number, ctx: ParseContext) {
+      const state = ctx.state as StateBlock, run = state.run;
+      if (pos !== run.at) { run.at = pos; run.line++; }
+      const end = run.line < run.endLine ? test(state, run.line, pos) : -1;
+      return end < 0 ? { ok: false, expected, span: { start: pos, end: pos } } : { ok: true, value: null, span: { start: pos, end } };
+    },
+  };
+}
+
+/** A run's body: the block reader over the run's lines. */
+const runBody: Combinator<null> = {
+  _tag: "container", _meta: { ...anywhere, canMatchNewline: true }, _def: { tag: "unknown" },
+  parse(input: string, _pos: number, ctx: ParseContext) {
+    const view = ctx.lineView!;
+    // Nested runs read the document, so their columns count from its lines.
+    ctx.lineView = undefined;
+    const state = ctx.state as StateBlock;
+    const { start, read } = state.run;
+    read(start + view.lines.length);
+    const consumed = state.line - start;
+    return { ok: true, value: null, span: { start: 0, end: consumed < view.lines.length ? view.lines[consumed]!.offset : input.length } };
+  },
+};
+
+/** Collect the run `grammar` opens at `start`, and read it with `read`. */
+function readRun(state: StateBlock, grammar: Combinator<null>, start: number, endLine: number, firstEnd: number, read: (end: number) => void): void {
+  const run = state.run;
+  run.start = start; run.line = start - 1; run.at = -1; run.endLine = endLine; run.firstEnd = firstEnd;
+  run.lastEmpty = false; run.terminated = false; run.read = read;
+  const lineStart = state.src.lastIndexOf("\n", state.bMarks[start]! - 1) + 1;
+  if (!grammar.parse(state.src, lineStart, state.context ??= { trackLines: false, state }).ok) throw new Error("a container run did not open");
+}
+
+const quoteLine = (state: StateBlock, line: number) =>
+  state.src.charCodeAt(state.bMarks[line]! + state.tShift[line]!) === 0x3e && state.sCount[line]! >= state.blkIndent;
+
+// A quote line: `>` after any indentation, on a line the enclosing block reaches.
+const quotePrefix = lineCheck("blockquote marker", (state, line) => {
+  const pos = state.bMarks[line]! + state.tShift[line]!, max = state.eMarks[line]!;
+  if (pos >= max || !quoteLine(state, line)) return -1;
+  state.run.lastEmpty = state.skipSpaces(pos + 1) >= max;
+  return pos + 1;
+});
+// A lazy quote line continues a paragraph: it follows a quote line with content,
+// and starts no block that ends the quote.
+const quoteLazy = lineCheck("lazy continuation", (state, line, pos) => {
+  if (state.isEmpty(line) || state.run.lastEmpty) return -1;
+  if (terminates(state.md.block.ruler.getRules("blockquote"), state, line, state.run.endLine)) { state.run.terminated = true; return -1; }
+  return pos;
+});
+const quote = lines(quotePrefix, runBody, { lazy: quoteLazy });
+
+// An item's first line ends at its marker; later lines belong when blank or
+// indented to the item's content.
+const itemFirst = lineCheck("list marker", state => state.run.firstEnd);
+const itemPrefix = lineCheck("list item indentation", (state, line, pos) => state.isEmpty(line) || state.sCount[line]! >= state.blkIndent ? pos : -1);
+// A line a paragraph in the item may continue onto: it follows a line with
+// content and is no marker that ends the item's paragraphs.
+const itemLazy = lineCheck("lazy continuation", (state, line, pos) => {
+  if (state.isEmpty(line - 1)) return -1;
+  const marker = skipBulletListMarker(state, line) >= 0 || skipOrderedListMarker(state, line) >= 0;
+  return marker && state.sCount[line]! - state.listIndent < 4 ? -1 : pos;
+});
+const item = lines(itemPrefix, runBody, { first: itemFirst, lazy: itemLazy });
+
+/** Read a list item's blocks: the run of lines from `line`, whose marker ends at `markerEnd`. */
+export function readItem(state: StateBlock, line: number, endLine: number, markerEnd: number, empty: boolean): void {
+  readRun(state, item, line, endLine, markerEnd, end => {
+    // An item that starts with two blank lines is empty.
+    if (empty && state.isEmpty(line + 1)) state.line = Math.min(state.line + 2, end);
+    else state.md.block.tokenize(state, line, end);
+  });
+}
 
 const blockquote: BlockRule = (state, startLine, endLine, silent) => {
-  let pos = state.bMarks[startLine]! + state.tShift[startLine]!;
-  let max = state.eMarks[startLine]!;
-  const oldLineMax = state.lineMax;
-  if (state.sCount[startLine]! - state.blkIndent >= 4 || state.src.charCodeAt(pos) !== 0x3e) return false;
+  if (state.sCount[startLine]! - state.blkIndent >= 4 || state.src.charCodeAt(state.bMarks[startLine]! + state.tShift[startLine]!) !== 0x3e) return false;
   if (silent) return true;
-  const oldBMarks: number[] = [], oldBSCount: number[] = [], oldSCount: number[] = [], oldTShift: number[] = [];
-  const terminators = state.md.block.ruler.getRules("blockquote");
+  const oldLineMax = state.lineMax;
   const oldParentType = state.parentType;
   state.parentType = "blockquote";
-  let lastLineEmpty = false;
-  let nextLine: number;
-  const save = (line: number) => { oldBMarks.push(state.bMarks[line]!); oldBSCount.push(state.bsCount[line]!); oldTShift.push(state.tShift[line]!); oldSCount.push(state.sCount[line]!); };
-  for (nextLine = startLine; nextLine < endLine; nextLine++) {
-    const isOutdented = state.sCount[nextLine]! < state.blkIndent;
-    pos = state.bMarks[nextLine]! + state.tShift[nextLine]!;
-    max = state.eMarks[nextLine]!;
-    if (pos >= max) break;
-    if (state.src.charCodeAt(pos++) === 0x3e && !isOutdented) {
+  readRun(state, quote, startLine, endLine, 0, nextLine => {
+    const oldBMarks: number[] = [], oldBSCount: number[] = [], oldSCount: number[] = [], oldTShift: number[] = [];
+    const save = (line: number) => { oldBMarks.push(state.bMarks[line]!); oldBSCount.push(state.bsCount[line]!); oldTShift.push(state.tShift[line]!); oldSCount.push(state.sCount[line]!); };
+    const terminated = state.run.terminated;
+    for (let line = startLine; line < nextLine; line++) {
+      // A lazy continuation line: a paragraph inside may continue onto it.
+      if (!quoteLine(state, line)) { save(line); state.sCount[line] = -1; continue; }
+      let pos = state.bMarks[line]! + state.tShift[line]! + 1;
+      const max = state.eMarks[line]!;
       // The marker and one following space, or one column of a following tab, open the quote's line.
-      let initial = state.sCount[nextLine]! + 1;
+      let initial = state.sCount[line]! + 1;
       let spaceAfterMarker: boolean, adjustTab = false;
       if (state.src.charCodeAt(pos) === 0x20) { pos++; initial++; spaceAfterMarker = true; }
       else if (state.src.charCodeAt(pos) === 0x09) {
         spaceAfterMarker = true;
-        if ((state.bsCount[nextLine]! + initial) % 4 === 3) { pos++; initial++; } else adjustTab = true;
+        if ((state.bsCount[line]! + initial) % 4 === 3) { pos++; initial++; } else adjustTab = true;
       } else spaceAfterMarker = false;
       let offset = initial;
-      oldBMarks.push(state.bMarks[nextLine]!);
-      state.bMarks[nextLine] = pos;
+      oldBMarks.push(state.bMarks[line]!);
+      state.bMarks[line] = pos;
       while (pos < max) {
         const code = state.src.charCodeAt(pos);
         if (!isSpace(code)) break;
-        offset += code === 0x09 ? 4 - (offset + state.bsCount[nextLine]! + (adjustTab ? 1 : 0)) % 4 : 1;
+        offset += code === 0x09 ? 4 - (offset + state.bsCount[line]! + (adjustTab ? 1 : 0)) % 4 : 1;
         pos++;
       }
-      lastLineEmpty = pos >= max;
-      oldBSCount.push(state.bsCount[nextLine]!);
-      state.bsCount[nextLine] = state.sCount[nextLine]! + 1 + (spaceAfterMarker ? 1 : 0);
-      oldSCount.push(state.sCount[nextLine]!);
-      state.sCount[nextLine] = offset - initial;
-      oldTShift.push(state.tShift[nextLine]!);
-      state.tShift[nextLine] = pos - state.bMarks[nextLine]!;
-      continue;
+      oldBSCount.push(state.bsCount[line]!);
+      state.bsCount[line] = state.sCount[line]! + 1 + (spaceAfterMarker ? 1 : 0);
+      oldSCount.push(state.sCount[line]!);
+      state.sCount[line] = offset - initial;
+      oldTShift.push(state.tShift[line]!);
+      state.tShift[line] = pos - state.bMarks[line]!;
     }
-    if (lastLineEmpty) break;
-    if (terminates(terminators, state, nextLine, endLine)) {
+    if (terminated) {
       // A terminated quote ends here even for a paragraph's continuation lines.
       state.lineMax = nextLine;
       if (state.blkIndent !== 0) { save(nextLine); state.sCount[nextLine]! -= state.blkIndent; }
-      break;
     }
-    // A lazy continuation line: a paragraph inside may continue onto it.
-    save(nextLine);
-    state.sCount[nextLine] = -1;
-  }
-  const oldIndent = state.blkIndent;
-  state.blkIndent = 0;
-  const open = state.push("blockquote_open", "blockquote", 1);
-  open.markup = ">";
-  const lines: [number, number] = [startLine, 0];
-  open.map = lines;
-  state.md.block.tokenize(state, startLine, nextLine);
-  state.push("blockquote_close", "blockquote", -1).markup = ">";
-  state.lineMax = oldLineMax;
+    const oldIndent = state.blkIndent;
+    state.blkIndent = 0;
+    const open = state.push("blockquote_open", "blockquote", 1);
+    open.markup = ">";
+    const map: [number, number] = [startLine, 0];
+    open.map = map;
+    state.md.block.tokenize(state, startLine, nextLine);
+    state.push("blockquote_close", "blockquote", -1).markup = ">";
+    state.lineMax = oldLineMax;
+    map[1] = state.line;
+    for (let i = 0; i < oldTShift.length; i++) {
+      state.bMarks[i + startLine] = oldBMarks[i]!; state.tShift[i + startLine] = oldTShift[i]!;
+      state.sCount[i + startLine] = oldSCount[i]!; state.bsCount[i + startLine] = oldBSCount[i]!;
+    }
+    state.blkIndent = oldIndent;
+  });
   state.parentType = oldParentType;
-  lines[1] = state.line;
-  for (let i = 0; i < oldTShift.length; i++) {
-    state.bMarks[i + startLine] = oldBMarks[i]!; state.tShift[i + startLine] = oldTShift[i]!;
-    state.sCount[i + startLine] = oldSCount[i]!; state.bsCount[i + startLine] = oldBSCount[i]!;
-  }
-  state.blkIndent = oldIndent;
   return true;
 };
 
@@ -559,8 +662,7 @@ const list: BlockRule = (state, startLine, endLine, silent) => {
     state.tShift[nextLine] = contentStart - state.bMarks[nextLine]!;
     state.sCount[nextLine] = offset;
     // An item that starts with two blank lines is empty.
-    if (contentStart >= max && state.isEmpty(nextLine + 1)) state.line = Math.min(state.line + 2, endLine);
-    else state.md.block.tokenize(state, nextLine, endLine);
+    readItem(state, nextLine, endLine, posAfterMarker, contentStart >= max);
     if (!state.tight || prevEmptyEnd) tight = false;
     prevEmptyEnd = state.line - nextLine > 1 && state.isEmpty(state.line - 1);
     state.blkIndent = state.listIndent;
@@ -617,6 +719,7 @@ export class ParserBlock {
     while (line < endLine) {
       state.line = line = state.skipEmptyLines(line);
       if (line >= endLine || state.sCount[line]! < state.blkIndent) break;
+      if (state.stop !== undefined && state.level === 0 && state.stop(line)) break;
       // Deep nesting reads the rest as nothing rather than overflowing the stack.
       if (state.level >= maxNesting) { state.line = endLine; break; }
       const prevLine = state.line;
@@ -633,9 +736,10 @@ export class ParserBlock {
       if (line < endLine && state.isEmpty(line)) { hasEmptyLines = true; state.line = ++line; }
     }
   }
-  parse(src: string, md: Engine, env: Env, tokens: Token[]): void {
+  parse(src: string, md: Engine, env: Env, tokens: Token[], stop?: (line: number) => boolean): void {
     if (!src) return;
     const state = new StateBlock(src, md, env, tokens);
+    state.stop = stop;
     this.tokenize(state, state.line, state.lineMax);
   }
 }

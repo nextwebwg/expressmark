@@ -1,8 +1,7 @@
 import { Engine, type StateBlock, type StateInline, type Token } from "./markdown/engine.js";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
-import { autolinks } from "./autolinks.js";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { alertMarker, attach, compact, contentHash, contentHashes, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { alertMarker, attach, childHashes, compact, contentHash, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installStandard, standardRules, type StandardRule } from "./standard.js";
@@ -61,8 +60,8 @@ function readers(standard: ReadonlySet<StandardRule>): Readers {
   const key=[...standard].sort().join(",");
   const cached=readerCache.get(key);
   if(cached) return cached;
-  const md=new Engine("default",{html:true,linkify:true},autolinks);
-  const lexicalMd=new Engine("default",{html:true},autolinks);
+  const md=new Engine("default",{html:true,linkify:true});
+  const lexicalMd=new Engine("default",{html:true});
   const originals={reference:md.block.ruler.get("reference").fn,newline:md.inline.ruler.get("newline").fn,link:md.inline.ruler.get("link").fn,image:md.inline.ruler.get("image").fn};
   const inlineHook=(name: keyof Hooks): InlineHook => (state,silent) => (hooksOf(state)[name] as InlineHook)(state,silent);
   const blockHook=(name: keyof Hooks): BlockHook => (state,start,end,silent) => (hooksOf(state)[name] as BlockHook)(state,start,end,silent);
@@ -86,7 +85,64 @@ function readers(standard: ReadonlySet<StandardRule>): Readers {
   readerCache.set(key,built);
   return built;
 }
+/** A top-level block: its source lines, after any frontmatter, and the nodes it made. */
+interface Top { start: number; end: number; nodes: Node[]; definitions?: boolean }
+/** What a parse leaves for reading an edit of its document. */
+interface Session {
+  markdown: string; source: string; front: string;
+  /** Undefined when an edit re-reads the whole document. */
+  tops: Top[] | undefined;
+  references: Record<string,{href:string;title:string}> | undefined;
+  footnotes: readonly string[];
+  positions: WeakMap<Node,Position>;
+  itemLines: WeakMap<Node,[number,number][]>;
+}
+interface Edit { session: Session; from: number; to: number; text: string }
+
+// Whether blocks hold a link or footnote definition at any depth.
+function definitionsOf(nodes: readonly Node[]): boolean {
+  const visit=(node: Node): boolean => node.type === "definition" || node.type === "footnoteDefinition" || (node.body ?? node.children ?? []).some(visit);
+  return nodes.some(visit);
+}
+const topDefinitions=(top: Top) => top.definitions ??= definitionsOf(top.nodes);
+
 export function parse(markdown: string, options: ConversionOptions = {}): Document {
+  return read(markdown,options).document;
+}
+
+/** A parsed document that reads an edit by re-reading only the blocks it changes. */
+export interface MarkdownDoc {
+  /** The document, as `parse` reads `text`. Read it; an edit reuses its unchanged nodes. */
+  readonly document: Document;
+  readonly text: string;
+  /** The document with `text.slice(from, to)` replaced by `replacement`. */
+  edit(from: number, to: number, replacement: string): MarkdownDoc;
+}
+
+/**
+ * Parse `markdown` for editing. Each edit re-reads from the top-level block
+ * before it until the blocks after it start where they started before, and
+ * reuses every other block's nodes; its document equals `parse` of the edited
+ * text. An edit re-reads the whole document when it changes the frontmatter or
+ * the link and footnote definitions, when the text holds a carriage return or
+ * a byte order mark, and with `lint` or `onDiagnostic`, whose findings span
+ * the document.
+ */
+export function parseDoc(markdown: string, options: ConversionOptions = {}): MarkdownDoc {
+  return markdownDoc(read(markdown,options,undefined,true),options);
+}
+function markdownDoc({document,session}: {document: Document; session?: Session}, options: ConversionOptions): MarkdownDoc {
+  const current=session!;
+  return {document,text:current.markdown,edit(from,to,replacement) {
+    if(!Number.isInteger(from) || !Number.isInteger(to) || from<0 || to<from || to>current.markdown.length) throw new RangeError(`An edit's range must lie within the text: ${from} to ${to}.`);
+    if(typeof replacement !== "string") throw new TypeError("An edit's replacement must be a string.");
+    const next=current.markdown.slice(0,from)+replacement+current.markdown.slice(to);
+    const reuse=current.tops !== undefined && !options.lint && !options.onDiagnostic && !/[\r\uFEFF]/.test(replacement);
+    return markdownDoc(read(next,options,reuse ? {session:current,from,to,text:replacement} : undefined,true),options);
+  }};
+}
+
+function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = false): {document: Document; session?: Session} {
   validateSyntax(options.syntax);
   spelled=false;
   if (typeof markdown !== "string") throw new TypeError("Markdown must be a string.");
@@ -106,7 +162,13 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   const defined=new Set<string>();
   const env: Record<string,unknown> = {hooks,options};
   const tasks=new WeakMap<Node,RegExpExecArray>();
-  let source = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g,"\n");
+  // A top-level list's items' source lines, for writing an edited list back item by item.
+  const itemLines=new WeakMap<Node,[number,number][]>();
+  let source = markdown.charCodeAt(0) === 0xfeff ? markdown.slice(1) : markdown;
+  if(source.includes("\r")) source=source.replace(/\r\n?/g,"\n");
+  // Top-level blocks, recorded while reading `topSource` from line `topBase`.
+  const tops: Top[]=[];
+  let topBase=0, topSource=source, restartable=keep && !/[\r\uFEFF]/.test(markdown);
   let recoveredFrontmatter: Node | undefined;
   let frontmatterValid=false;
 
@@ -622,9 +684,9 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     const lineAt=(index: number)=>lines()[index] ?? "";
     // The block nodes a token made take its source lines, for lint positions.
     const place=(nodes: Node[], at: number, map: [number,number] | null | undefined)=> {
-      if(!map || original !== source) return;
+      if(!map || original !== topSource) return;
       // Only lint reports the end column, which reading the source's lines gives.
-      for(const node of nodes.slice(at)) if(!positions.has(node)) positions.set(node,{start:{line:map[0]+lineOffset+1,column:1},end:{line:map[1]+lineOffset,column:options.lint ? lineAt(map[1]-1).length+1 : 1}});
+      for(const node of nodes.slice(at)) if(!positions.has(node)) positions.set(node,{start:{line:map[0]+topBase+lineOffset+1,column:1},end:{line:map[1]+topBase+lineOffset,column:options.lint ? lineAt(map[1]-1).length+1 : 1}});
     };
     // Top-level blocks always take their lines, for writing them back exactly.
     let depth=0;
@@ -632,7 +694,15 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
       depth++;
       const nodes: Node[]=[];
       let made: {at: number; map: [number,number] | null} | undefined;
-      const finish=()=>{ if(made && (options.lint || depth === 1)) place(nodes,made.at,made.map); };
+      const finish=()=>{
+        if(!made) return;
+        // A block that makes no node, such as filtered HTML, still holds its lines.
+        if(depth === 1 && keep && original === topSource) {
+          if(made.map) tops.push({start:made.map[0]+topBase,end:made.map[1]+topBase,nodes:nodes.slice(made.at)});
+          else if(nodes.length>made.at) restartable=false;
+        }
+        if(options.lint || depth === 1) place(nodes,made.at,made.map);
+      };
       while(cursor<tokens.length) {
         finish();
         const token=tokens[cursor++]!;
@@ -702,7 +772,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           // A `standard` list splits at a blank line, so only its items can be loose.
           node.tight=standard.has("looseLists") || !loose;
           // Lint: indentation that mixes tabs and spaces, between items or within one.
-          if(options.lint && !standard.has("relativeLists") && original === source && linting(options.lint,"mixed-indentation")) {
+          if(options.lint && !standard.has("relativeLists") && original === topSource && linting(options.lint,"mixed-indentation")) {
             const lead=(index: number)=>/^[ \t]*/.exec(lineAt(index))![0];
             const unrelated=(a: string, b: string)=>!a.startsWith(b) && !b.startsWith(a);
             const items=tokens.slice(listStart,cursor).filter(item=>item.type === "list_item_open" && item.level === token.level+1 && item.map);
@@ -712,6 +782,14 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           }
           if(token.markup !== (node.ordered ? ".":"-")) spell(node,"marker",token.markup);
           if(node.ordered && items>1 && same) spell(node,"numbering","same");
+          if(depth === 1 && original === topSource) {
+            const ranges: [number,number][]=[];
+            for(let index=listStart;index<cursor;index++) {
+              const item=tokens[index]!;
+              if(item.type === "list_item_open" && item.level === token.level+1 && item.map) ranges.push([item.map[0]+topBase+lineOffset,item.map[1]+topBase+lineOffset]);
+            }
+            if(ranges.length === node.children!.length) itemLines.set(node,ranges);
+          }
           nodes.push(node);
         } else if(token.type === "list_item_open") {
           const body=read("list_item_close");
@@ -857,7 +935,7 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
           const originalRows=token.map ? lines().slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(splitRow) : rawCells;
           const hasMerges=originalRows.some(row=>row.some(cell=>/^[>^]$/.test(cell.trim())));
           // Lint: `\|` in a cell's code span, which `standard` syntax keeps as written.
-          if(token.map && original === source && !standard.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(lines().slice(token.map[0],token.map[1]).join("\n")))
+          if(token.map && original === topSource && !standard.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(lines().slice(token.map[0],token.map[1]).join("\n")))
             options.onDiagnostic?.({code:"table-code-pipe",message:"A code span in this table writes \\| for a pipe; in standard syntax the backslash shows, so write |.",severity:"warning",preferred:"| inside the code span",position:{start:{line:token.map[0]+lineOffset+1,column:1},end:{line:token.map[1]+lineOffset,column:lineAt(token.map[1]-1).length+1}}});
           const invalid=hasMerges && originalRows.some(row=>row.length !== (rows[0]?.children?.length ?? 0)) ? "Merged tables require every authored row to supply the same column count." : mergeTable(table,rawCells);
           if(invalid) {
@@ -945,9 +1023,97 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   }
   ({md,lexicalMd,originals}=readers(standard));
   if(syntax === "compatible" || frontSyntax) document.syntax=syntax;
-  document.body=normalizeTabs(blocks(md.parse(source,env),source));
+  const isTab=(node: Node)=>node.type === "container" && node.subType === "tab";
+  // Re-read the blocks an edit changes and reuse the rest, or read them all.
+  function reread({session,from,to,text}: Edit): Node[] | undefined {
+    const head=front?.[0] ?? "";
+    if(!session.tops || head !== session.front || from<head.length) return;
+    const lineOf=(value: string, offset: number)=>{ let line=0; for(let at=value.indexOf("\n");at >= 0 && at<offset;at=value.indexOf("\n",at+1)) line++; return line; };
+    const editLine=lineOf(session.source,from-head.length), oldLast=lineOf(session.source,to-head.length), newLast=lineOf(source,from-head.length+text.length), delta=newLast-oldLast;
+    // `standard` syntax reads an element through its end tag wherever that is,
+    // so a block before an edit can depend on the tags an edit changes: an edit
+    // that adds or removes tag text, falls on a line holding a tag, or lands
+    // inside a tag re-reads everything.
+    if(standard.has("html")) {
+      const lineSpan=(value: string, at: number, end: number)=>value.slice(value.lastIndexOf("\n",at-1)+1,(value.indexOf("\n",end)+1 || value.length+1)-1);
+      const prior=session.markdown, removed=prior.slice(from,to);
+      if(/[<>]/.test(removed+text) || lineSpan(prior,from,to).includes("<") || lineSpan(markdown,from,from+text.length).includes("<") || prior.lastIndexOf("<",from)>prior.lastIndexOf(">",from)) return;
+    }
+    // A block's reading saw its lines and the line after them, so the first
+    // block reaching the edited line is where reading restarts.
+    const old=session.tops;
+    let first=old.findIndex(top=>top.end >= editLine);
+    if(first<0) first=old.length;
+    const restart=Math.min(first<old.length ? old[first]!.start : editLine,editLine);
+    let offset=0;
+    for(let line=0;line<restart;line++) offset=source.indexOf("\n",offset)+1;
+    // Reading stops at the first block after the edit that starts where a block started before.
+    const starts=new Map<number,number>();
+    // Tokens from one block share its lines; resuming starts at the block's first.
+    old.forEach((top,index)=>{ if(top.start>oldLast && !starts.has(top.start)) starts.set(top.start,index); });
+    let resume=old.length, stopped=-1;
+    const stop=(line: number)=>{
+      const at=restart+line;
+      const index=at>newLast ? starts.get(at-delta) : undefined;
+      if(index === undefined) return false;
+      resume=index; stopped=at; return true;
+    };
+    // Reading usually stops within a few blocks of the edit, so the first read
+    // takes the text through the fourth block after it. A block's reading sees
+    // only its lines and the next, so a stop before that text's last line reads
+    // as it would in the whole text; otherwise the read takes the rest.
+    const next=old.findIndex(top=>top.start>oldLast);
+    const bound=next >= 0 && next+4<old.length ? old[next+4]!.start+delta : -1;
+    let end=source.length;
+    if(bound>restart) { end=offset; for(let line=restart;line<bound && end >= 0;line++) end=source.indexOf("\n",end)+1 || -1; if(end <= 0) end=source.length; }
+    let region: string, tokens: Token[];
+    for(;;) {
+      // The previous reading's definitions; the check below confirms they hold.
+      env.references={...session.references};
+      footnotes.clear(); for(const label of session.footnotes) footnotes.add(label);
+      resume=old.length; stopped=-1;
+      region=source.slice(offset,end);
+      tokens=md.parse(region,env,stop);
+      if(end === source.length || stopped >= 0 && stopped<bound) break;
+      end=source.length;
+    }
+    topBase=restart; topSource=region;
+    const raw=blocks(tokens,region);
+    if(!restartable || raw.some(isTab)) return;
+    // Every block's inline content reads against the document's definitions:
+    // re-read blocks that hold or held one, at any depth, re-read everything.
+    const before=old.slice(0,first), after=old.slice(resume);
+    if(old.slice(first,resume).some(top=>topDefinitions(top)) || definitionsOf(raw)) return;
+    const nodes=normalizeTabs(raw);
+    const shift=(position: Position): Position=>({start:{...position.start,line:position.start.line+delta},end:{...position.end,line:position.end.line+delta}});
+    for(const top of before) for(const node of top.nodes) {
+      const position=session.positions.get(node); if(position) positions.set(node,position);
+      const items=session.itemLines.get(node); if(items) itemLines.set(node,items);
+    }
+    const moved=after.map(top=>{
+      for(const node of top.nodes) {
+        const position=session.positions.get(node); if(position) positions.set(node,shift(position));
+        const items=session.itemLines.get(node); if(items) itemLines.set(node,items.map(([a,b])=>[a+delta,b+delta]));
+      }
+      return {...top,start:top.start+delta,end:top.end+delta};
+    });
+    tops.unshift(...before); tops.push(...moved);
+    document.body=[...before.flatMap(top=>top.nodes),...nodes,...after.flatMap(top=>top.nodes)];
+    return nodes;
+  }
+  let fresh=edit && restartable ? reread(edit) : undefined;
+  const incremental=fresh !== undefined;
+  if(!fresh) {
+    // A full reading starts from a clean slate.
+    tops.length=0; topBase=0; topSource=source; delete env.references; footnotes.clear(); defined.clear();
+    restartable=keep && !/[\r\uFEFF]/.test(markdown);
+    const raw=blocks(md.parse(source,env),source);
+    if(raw.some(isTab)) restartable=false;
+    fresh=document.body=normalizeTabs(raw);
+  }
   if(documentTitle !== undefined) document.title=compact({type:"title"},inline(documentTitle));
-  const notes=footnoteDefinitions(document);
+  // Warnings span the document, and are only read through `onDiagnostic`.
+  const notes=options.onDiagnostic ? footnoteDefinitions(document) : new Map<string,Node>();
   if(notes.size) {
     const used=new Set(referenceOrder(document,notes));
     for(const label of notes.keys()) if(!used.has(label)) warn(options,"unused-footnote",`Footnote [^${label}] is never referenced.`);
@@ -955,8 +1121,11 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
   if(recoveredFrontmatter) {
     document.body.unshift(recoveredFrontmatter);
     positions.set(recoveredFrontmatter,{start:{line:1,column:1},end:{line:lineOffset,column:1}});
+    if(incremental) fresh=[recoveredFrontmatter,...fresh];
   }
-  clearAutomatic(document);
+  // The passes below leave a block as they found it once they have seen it,
+  // so after an edit they visit only the blocks it re-read.
+  if(incremental) fresh.forEach(clearAutomatic); else clearAutomatic(document);
   // A fence longer than the writer's own is a spelling; an equal one is not.
   // Returns the length the writer gives a container, or its deepest nested one.
   // The same walk fingerprints each recorded raw spelling.
@@ -972,34 +1141,59 @@ export function parse(markdown: string, options: ConversionOptions = {}): Docume
     if(recorded <= own) { const {fence: _fence,...rest}=node.source!; if(Object.keys(rest).length) node.source=rest; else delete node.source; return own; }
     return recorded;
   };
-  if(spelled) fences(document);
+  if(spelled && incremental) {
+    if(typeof document.title === "object" && document.title !== null) fences(document.title);
+    fresh.forEach(fences); rememberSpellings(document);
+  } else if(spelled) fences(document);
   // CommonMark's HTML blocks can split an element, so stray end tags are found across the document.
-  if(!standard.has("html")) {
+  if(!standard.has("html") && options.onDiagnostic) {
     const values: string[]=[];
     const collect=(node: Node): void => { if(node.type === "html" && node.value) values.push(node.value); for(const child of node.body ?? node.children ?? []) collect(child); };
     collect(document);
     for(const stray of normalizeTags(values.join("")).strays) warn(options,"stray-end-tag",`${stray} closes no open element; it is ignored.`);
   }
-  diagnoseIds(document,options);
+  if(options.onDiagnostic) diagnoseIds(document,options);
   if(options.lint) lint(document,positions,options);
-  recordSource(document,markdown,positions,lineOffset,frontmatterValid,options);
-  return document;
+  recordSource(document,markdown,positions,itemLines,lineOffset,frontmatterValid,options,keep);
+  if(!keep) return {document};
+  return {document,session:{markdown,source,front:front?.[0] ?? "",tops:restartable ? tops : undefined,references:env.references as Session["references"],footnotes:[...footnotes],positions,itemLines}};
+}
+
+// A node's hash as its source record holds it. A document parsed for editing
+// hashes the nodes it made once, and an edit reuses the hashes of the nodes it
+// reuses.
+const hashes=new WeakMap<Node,string>();
+function recordedHash(node: Node): string {
+  let hash=hashes.get(node);
+  if(hash === undefined) { hash=contentHash(node); hashes.set(node,hash); }
+  return hash;
 }
 
 /**
  * Record what writing an unedited document back byte for byte needs: its
  * source text, and each top-level block's range in it with a hash of the
  * block's data. Blocks whose source shares lines form one range. A writer
- * replays a range while its blocks still hash the same.
+ * replays a range while its blocks still hash the same. A range holding one
+ * list also records each item's range and hash, with a hash of the list apart
+ * from its items, so a writer replays the items an edit leaves alone.
  */
-function recordSource(document: Document, text: string, positions: WeakMap<Node,Position>, headLines: number, head: boolean, options: ConversionOptions): void {
+function recordSource(document: Document, text: string, positions: WeakMap<Node,Position>, itemLines: WeakMap<Node,[number,number][]>, headLines: number, head: boolean, options: ConversionOptions, keep: boolean): void {
+  const hashOf=keep ? recordedHash : contentHash;
   const starts=[0], ends: number[]=[];
-  for(let index=0;index<text.length;index++) {
+  if(text.includes("\r")) for(let index=0;index<text.length;index++) {
     const code=text.charCodeAt(index);
     if(code === 10 || code === 13) { ends.push(index); if(code === 13 && text.charCodeAt(index+1) === 10) index++; starts.push(index+1); }
-  }
+  } else for(let index=text.indexOf("\n");index >= 0;index=text.indexOf("\n",index+1)) { ends.push(index); starts.push(index+1); }
   ends.push(text.length);
-  const hashes=contentHashes(document.body);
+  // A list's items are hashed with it, each serialized once.
+  const listed=new Map<Node,string[]>();
+  const blockHashes=document.body.map(node=>{
+    if(node.type !== "list" || !itemLines.has(node) || keep && hashes.has(node)) return hashOf(node);
+    const {hash,children}=childHashes(node);
+    listed.set(node,children);
+    if(keep) { hashes.set(node,hash); node.children!.forEach((item,index)=>hashes.set(item,children[index]!)); }
+    return hash;
+  });
   // Where tags appear, which marks blocks holding HTML the safe profile may filter.
   const tags: number[]=[];
   for(const match of text.matchAll(/<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])|<!--|<\?|<![A-Za-z]/g)) tags.push(match.index);
@@ -1010,18 +1204,30 @@ function recordSource(document: Document, text: string, positions: WeakMap<Node,
     const inner=(node.body ?? []).map(range);
     return inner.length && inner.every(Boolean) ? [inner[0]![0],inner.at(-1)![1]] : undefined;
   };
-  // Each entry: block count, hash, source range, and 1 when its source holds HTML.
-  const blocks: [number,string,number,number,number][]=[];
+  // Each entry: block count, hash, source range, 1 when its source holds HTML,
+  // and for one list, the list's hash apart from its items followed by each
+  // item's hash and source range.
+  const blocks: ([number,string,number,number,number] | [number,string,number,number,number,(string | number)[]])[]=[];
+  // A line range's offsets, without the blank lines that end it.
+  const offsets=(from: number, to: number): [number,number] => {
+    while(to-1>from && !text.slice(starts[to-1],ends[to-1]).trim()) to--;
+    return [starts[from]!,ends[to-1]!];
+  };
   let group: {at: number; count: number; from: number; to: number} | undefined;
   const close=()=>{
     if(!group) return;
     // Trailing blank lines are spacing, which belongs between blocks.
-    while(group.to-1>group.from && !text.slice(starts[group.to-1],ends[group.to-1]).trim()) group.to--;
-    const from=starts[group.from]!, to=ends[group.to-1]!;
+    const [from,to]=offsets(group.from,group.to);
     // A tag anywhere in the block, code included, marks HTML the safe profile may filter.
     while(tag<tags.length && tags[tag]!<from) tag++;
     const html=tag<tags.length && tags[tag]!<to ? 1:0;
-    blocks.push([group.count,hashes.slice(group.at,group.at+group.count).join("+"),from,to,html]);
+    const node=document.body[group.at]!, items=group.count === 1 ? itemLines.get(node) : undefined;
+    if(items && items.every(([first,last])=>last>first && last<=ends.length)) {
+      const parts: (string | number)[]=[contentHash({...node,children:[]})];
+      const each=listed.get(node);
+      node.children!.forEach((item,index)=>parts.push(each?.[index] ?? hashOf(item),...offsets(items[index]![0],items[index]![1])));
+      blocks.push([group.count,blockHashes[group.at]!,from,to,html,parts]);
+    } else blocks.push([group.count,blockHashes.slice(group.at,group.at+group.count).join("+"),from,to,html]);
   };
   for(const [index,node] of document.body.entries()) {
     const lines=range(node);

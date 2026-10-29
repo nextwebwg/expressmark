@@ -149,7 +149,9 @@ conformance. The normative [syntax](https://nextwebwg.org/expressive-markdown/la
 parse writes back byte for byte, in both syntaxes, spacing and line endings
 included: the document records its source text and each top-level block's
 range in `source`, and an edited or new block is written in canonical form with
-the source's spacing kept around its unedited neighbours. A document built
+the source's spacing kept around its unedited neighbours. A top-level list
+writes back item by item, and a pipe table cell by cell: an edit rewrites the
+items or cells it changed and the rest keep their source. A document built
 without a source is written in canonical form with a terminal newline, or `""`
 when empty. In the safe profile, a block holding HTML is written through the
 profile. Neither executes code, loads
@@ -163,6 +165,23 @@ const document = parse(source, {
   },
 });
 const markdown = stringify(document, { onDiagnostic: console.warn });
+```
+
+`parseDoc(markdown, options?)` parses for editing. Its `document` is what
+`parse` returns, and `edit(from, to, replacement)` returns the document for the
+edited text: it re-reads from the top-level block before the edit until the
+blocks after it start where they started before, and reuses every other
+block's nodes. An edit that changes the frontmatter or touches a link or
+footnote definition re-reads the whole document, as does every edit with `lint`
+or `onDiagnostic`, whose findings span the document, and every edit of text
+holding a carriage return. In `standard` syntax, an edit touching an HTML tag
+re-reads the whole document, since an element reads through its end tag.
+Treat a document as read-only while you edit it.
+
+```ts
+let doc = parseDoc(source);
+doc = doc.edit(offset, offset, "x"); // one keystroke
+const html = renderHtml(doc.document);
 ```
 
 Recoverable source errors become `literal` nodes with optional warnings. Duplicate
@@ -226,10 +245,10 @@ watch and benchmark commands. Shared settings take effect locally after merging
 them to the default branch.
 
 TypeScript 7 builds strict ESM declarations. Parseman grammars recognize Markdown's
-constructs and the extension tokens; the reader in `src/markdown` applies
-CommonMark's block and emphasis algorithms to what they recognize. YAML handles
-metadata, linkify-it finds bare URLs, and sanitize-html with htmlparser2 handles
-the safe native profile. Oxlint and Vitest check conversions,
+constructs, the extension tokens and bare URLs; the reader in `src/markdown`
+applies CommonMark's block and emphasis algorithms to what they recognize, and
+reads block quotes and list items as Parseman line runs. YAML handles metadata,
+and sanitize-html with htmlparser2 handles the safe native profile. Oxlint and Vitest check conversions,
 unsafe input, malformed data, round trips and a fresh packed-package consumer.
 
 The manual **Release** workflow publishes reviewed `main` through the protected

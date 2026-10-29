@@ -14,6 +14,13 @@ if (data.schema === "compare") {
   for (const row of data.results) {
     console.log(`| ${row.set} | ${row.syntax} | ${row.documents} | ${span(row.base)} | ${span(row.candidate)} | ${row.ratio.toFixed(3)}× | ${row.minRoundRatio.toFixed(3)}–${row.maxRoundRatio.toFixed(3)} | ${mb(row.base.retainedBytes)} | ${mb(row.candidate.retainedBytes)} | ${mb(row.base.peakBytes)} | ${mb(row.candidate.peakBytes)} | ${row.differing} |`);
   }
+} else if (data.schema === "incremental") {
+  const { bytes, lines, edits } = data.results[0];
+  console.log(`One-character edits at ${edits.length} positions in a ${bytes}-byte, ${lines}-line README; ${data.protocol.rounds} rounds.\n`);
+  console.log("| Syntax | Full parse median ms (Q1–Q3) | Edit median ms (Q1–Q3) | Ratio | Round ratios |");
+  console.log("| --- | ---: | ---: | ---: | ---: |");
+  const span = leg => `${leg.medianMs.toFixed(3)} (${leg.q1Ms.toFixed(3)}–${leg.q3Ms.toFixed(3)})`;
+  for (const row of data.results) console.log(`| ${row.syntax} | ${span(row.full)} | ${span(row.incremental)} | ${row.ratio.toFixed(4)}× | ${row.minRoundRatio.toFixed(4)}–${row.maxRoundRatio.toFixed(4)} |`);
 } else {
   for (const operation of ["parse", "stringify", "round-trip", "to-html"]) {
     console.log(`## ${operation}\n\n| Fixture | Bytes | Implementation | Median µs/op | Min–max µs/op |\n| --- | ---: | --- | ---: | ---: |`);

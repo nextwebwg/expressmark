@@ -351,17 +351,58 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     return lists.length ? `${kept}${opened.slice(kept.length).replace(/([ \t])\{/g,"$1\\{")}` : opened;
   }
   // GFM pipe form: one header row, inline cells and no merges, captions or attributes.
+  // A cell's content in a pipe table row, or undefined when one line cannot hold it.
+  function pipeCell(cell: Node): string | undefined {
+    if(JSON.stringify(cell).includes("inlineCode") && JSON.stringify(cell).includes("|")) return;
+    const value=content(cell).replace(/\|/g,"\\|");
+    return value.includes("\n") ? undefined : /^[>^]$/.test(value) ? `\\${value}`:value;
+  }
+  // An edited pipe table written from its authored source with only the edited
+  // cells rewritten, while its shape, alignment and headers are as authored.
+  function patchCells(authored: string, node: Node): string | undefined {
+    let before: Node | undefined;
+    try { before=parse(authored,probeOptions).body[0]; } catch { return; }
+    const rows=node.children ?? [], old=before?.children ?? [];
+    if(before?.type !== "table" || JSON.stringify(before.align) !== JSON.stringify(node.align) || old.length !== rows.length) return;
+    const source=authored.split("\n");
+    if(source.length !== rows.length+1) return;
+    for(const [r,row] of rows.entries()) {
+      const cells=row.children ?? [], previous=old[r]!.children ?? [];
+      if(cells.length !== previous.length || cells.some((cell,c)=>cell.header !== previous[c]!.header || cell.type !== "tableCell")) return;
+      const index=r === 0 ? 0 : r+1, line=source[index]!;
+      // Each cell's content offsets, split on unescaped pipes as the reader splits a row.
+      let from=/^[ \t]*/.exec(line)![0].length, to=line.length-/[ \t]*$/.exec(line)![0].length;
+      if(line[from] === "|") from++;
+      if(to>from && line[to-1] === "|" && line[to-2] !== "\\") to--;
+      const slices: [number,number][]=[];
+      let start=from;
+      for(let i=from;i<=to;i++) {
+        if(i<to && line[i] === "\\") { i++; continue; }
+        if(i<to && line[i] !== "|") continue;
+        let a=start, b=i;
+        while(a<b && /[ \t]/.test(line[a]!)) a++;
+        while(b>a && /[ \t]/.test(line[b-1]!)) b--;
+        slices.push([a,b]); start=i+1;
+      }
+      if(slices.length !== cells.length) return;
+      let written=line;
+      for(let c=cells.length-1;c>=0;c--) {
+        if(sameData(cells[c],previous[c])) continue;
+        const value=pipeCell(cells[c]!);
+        if(value === undefined) return;
+        written=written.slice(0,slices[c]![0])+value+written.slice(slices[c]![1]);
+      }
+      source[index]=written;
+    }
+    const patched=source.join("\n");
+    return reads(patched,node) ? patched : undefined;
+  }
   function pipeTable(node: Node, grid: Node[][]): string | undefined {
     if(!grid.length || node.title !== undefined || node.attributes || node.id !== undefined) return;
     if(!grid[0]!.every(cell=>cell.header) || grid.slice(1).some(row=>row.some(cell=>cell.header))) return;
     const cells=new Set<Node>();
     for(const row of grid) for(const cell of row) { if(cells.has(cell) || cell.body || cell.colSpan || cell.rowSpan) return; cells.add(cell); }
-    const write=(cell: Node)=> {
-      if(JSON.stringify(cell).includes("inlineCode") && JSON.stringify(cell).includes("|")) return;
-      const value=content(cell).replace(/\|/g,"\\|");
-      return value.includes("\n") ? undefined : /^[>^]$/.test(value) ? `\\${value}`:value;
-    };
-    const rows=grid.map(row=>row.map(write));
+    const rows=grid.map(row=>row.map(pipeCell));
     if(rows.some(row=>row.some(value=>value === undefined))) return;
     const align=grid[0]!.map((_cell,index)=>({start:":---",center:":---:",end:"---:"} as Record<string,string>)[node.align?.[index] ?? ""] ?? "---");
     return [rows[0]!,align,...rows.slice(1)].map(row=>`| ${row.join(" | ")} |`).join("\n");
@@ -397,6 +438,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(spelling(node,"form") === "pipe") {
       const authored=spelling(node,"markdown");
       if(authored && reads(authored,node,undefined,"markdown")) return authored;
+      const patched=authored ? patchCells(authored,node) : undefined;
+      if(patched) return patched;
       const pipe=pipeTable(node,grid);
       if(pipe) return pipe;
     }
@@ -610,7 +653,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
   function exactly(generatedHead: string, metadata: Record<string,unknown>): string | undefined {
     const recorded=document.source;
     if(typeof recorded?.text !== "string" || !Array.isArray(recorded.blocks)) return;
-    const text=recorded.text, blocks=recorded.blocks as [number,string,number,number,number][];
+    const text=recorded.text, blocks=recorded.blocks as [number,string,number,number,number,(string | number)[]?][];
     const trusted=recorded.trusted === true && options.trustedHtml === true;
     // The safe profile writes recorded source only where it holds no HTML: a
     // block without HTML, and spacing that is only whitespace.
@@ -642,12 +685,53 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         continue;
       }
       const node=nodes[index]!;
+      // An edited list whose recorded range comes next keeps its unedited items' source.
+      const next=blocks[used+1];
+      const items=node.type === "list" && next?.[0] === 1 && next[5] && replay(text.slice(next[2],next[3]),next[4]) ? listItems(node,next[5]) : undefined;
+      if(items !== undefined) {
+        const gap=end !== undefined && replay(text.slice(end,next![2])) ? text.slice(end,next![2]) : undefined;
+        output+=gap ?? (output && separator ? lines("\n\n"):"");
+        separator=true;
+        output+=items;
+        end=next![3]; used++; index++;
+        continue;
+      }
       const neighboringTabs=node.type === "container" && node.subType === "tabs" && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
       const value=block(node,neighboringTabs);
       if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; }
       index++;
     }
     if(end !== undefined && used === blocks.length-1 && replay(text.slice(end))) return output+text.slice(end);
-    return output ? output+newline : "";
+    // The document ends as its source ended: the whitespace after its last
+    // recorded block, a final line ending or none.
+    const ending=blocks.length ? text.slice(blocks.at(-1)![3]) : newline;
+    return output ? output+(ending.trim() ? newline : ending) : "";
+
+    // A list written item by item: an item that still hashes as recorded is
+    // written from its source, and any other item is written fresh with the
+    // list's markers.
+    // The result is kept only when it reads back as the list.
+    function listItems(list: Node, recordedItems: (string | number)[]): string | undefined {
+      if(contentHash({...list,children:[]}) !== recordedItems[0]) return;
+      // Each recorded item: its hash, then its source range.
+      const count=(recordedItems.length-1)/3;
+      const hash=(part: number)=>recordedItems[1+part*3], from=(part: number)=>recordedItems[2+part*3] as number, to=(part: number)=>recordedItems[3+part*3] as number;
+      const children=list.children ?? [], each=contentHashes(children);
+      const same=list.ordered && spelling(list,"numbering") === "same";
+      let written="", next=0, previous=-1;
+      for(const [index,item] of children.entries()) {
+        let found=-1;
+        for(let part=next;part<Math.min(count,next+64);part++) if(hash(part) === each[index]) { found=part; break; }
+        const value=found >= 0 ? text.slice(from(found),to(found)) : lines(block({...list,children:[item],start:(list.start ?? 1)+(same ? 0:index)}));
+        // Between items, the source's spacing where a recorded item borders the
+        // gap: an item edited in place keeps the spacing around it.
+        const gap=(after: number)=>text.slice(to(after),from(after+1));
+        if(index > 0) written+=previous >= 0 && previous+1 < count ? gap(previous) : found > 0 ? gap(found-1) : lines(list.tight ? "\n":"\n\n");
+        written+=value;
+        previous=found;
+        if(found >= 0) next=found+1;
+      }
+      return reads(written,list) ? written : undefined;
+    }
   }
 }

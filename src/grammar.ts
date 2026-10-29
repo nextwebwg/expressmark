@@ -237,11 +237,31 @@ function semanticJson(value: unknown): string {
  * A short hash of a node's JSON, for recognizing unedited blocks when writing:
  * FNV-1a with the length, a change detector rather than a cryptographic hash.
  */
+const feed = (hash: number, text: string): number => {
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  return hash;
+};
+const hashText = (hash: number, length: number) => `${(hash >>> 0).toString(36)}.${length.toString(36)}`;
 export function contentHash(value: unknown): string {
   const text = JSON.stringify(value) ?? "";
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
-  return `${(hash >>> 0).toString(36)}.${text.length.toString(36)}`;
+  return hashText(feed(0x811c9dc5, text), text.length);
+}
+/**
+ * A list's `contentHash` and each child's, serializing every child once: the
+ * list's JSON is its JSON without children, with the children's JSON in place.
+ */
+export function childHashes(node: { children?: unknown[] }): { hash: string; children: string[] } {
+  const marker = JSON.stringify("\u0000children\u0000");
+  const shell = JSON.stringify({ ...node, children: JSON.parse(marker) });
+  const at = shell.indexOf(marker);
+  const texts = (node.children ?? []).map(child => JSON.stringify(child) ?? "null");
+  let hash = feed(0x811c9dc5, shell.slice(0, at)), length = at;
+  hash = feed(hash, "["); length++;
+  texts.forEach((text, index) => { if (index) { hash = feed(hash, ","); length++; } hash = feed(hash, text); length += text.length; });
+  hash = feed(hash, "]"); length++;
+  const rest = shell.slice(at + marker.length);
+  hash = feed(hash, rest); length += rest.length;
+  return { hash: hashText(hash, length), children: texts.map(text => hashText(feed(0x811c9dc5, text), text.length)) };
 }
 export const contentHashes = (nodes: readonly unknown[]): string[] => nodes.map(contentHash);
 

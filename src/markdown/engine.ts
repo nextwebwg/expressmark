@@ -25,9 +25,9 @@
  */
 // A configured Markdown reader: block and inline rule lists, the core passes
 // that run between them, and options. Expressmark builds one per rule set.
-import { LinkifyIt } from "linkify-it";
 import { ParserBlock, StateBlock, type Env } from "./block.js";
 import { ParserInline, StateInline } from "./inline.js";
+import { linkify as bareLinks, type Linkify } from "./linkify.js";
 import { normalizeLink, normalizeLinkText, parseLinkLabel, validateLink } from "./links.js";
 import { Ruler } from "./ruler.js";
 import { Token } from "./token.js";
@@ -37,13 +37,18 @@ export interface EngineOptions { html: boolean; linkify: boolean; maxNesting: nu
 class StateCore {
   tokens: Token[] = [];
   inlineMode = false;
+  /** A top-level line where the block pass stops, for reading part of a document. */
+  stop: ((line: number) => boolean) | undefined;
   constructor(public src: string, public md: Engine, public env: Env) {}
 }
 type CoreRule = (state: StateCore) => void;
 
-const normalize: CoreRule = state => { state.src = state.src.replace(/\r\n?/g, "\n").replace(/\0/g, "�"); };
+const normalize: CoreRule = state => {
+  if (state.src.includes("\r")) state.src = state.src.replace(/\r\n?/g, "\n");
+  if (state.src.includes("\0")) state.src = state.src.replace(/\0/g, "�");
+};
 const block: CoreRule = state => {
-  if (!state.inlineMode) { state.md.block.parse(state.src, state.md, state.env, state.tokens); return; }
+  if (!state.inlineMode) { state.md.block.parse(state.src, state.md, state.env, state.tokens, state.stop); return; }
   const token = new Token("inline", "", 0);
   token.content = state.src; token.map = [0, 1]; token.children = [];
   state.tokens.push(token);
@@ -139,22 +144,19 @@ const text_join: CoreRule = state => {
   }
 };
 
-/** The URL detector a reader shares with its writer's escaping. */
-export function createLinkify(): LinkifyIt { return new LinkifyIt(); }
-
 export class Engine {
   options: EngineOptions;
   block = new ParserBlock();
   inline = new ParserInline();
   core = { ruler: new Ruler<CoreRule>() };
-  linkify: LinkifyIt;
+  linkify: Linkify;
   helpers = { parseLinkLabel };
   utils = { unescapeAll };
   validateLink = validateLink;
   normalizeLink = normalizeLink;
   normalizeLinkText = normalizeLinkText;
   /** `zero` enables only paragraphs and text, for callers that add the rules they need. */
-  constructor(preset: "default" | "zero", options: Partial<EngineOptions> = {}, linkify: LinkifyIt = createLinkify()) {
+  constructor(preset: "default" | "zero", options: Partial<EngineOptions> = {}, linkify: Linkify = bareLinks) {
     for (const [name, fn] of [["normalize", normalize], ["block", block], ["strip_references", strip_references], ["inline", inline], ["linkify", linkifyText], ["text_join", text_join]] as const) this.core.ruler.push(name, fn);
     this.linkify = linkify;
     this.options = { html: false, linkify: false, maxNesting: preset === "zero" ? 20 : 100, ...options };
@@ -171,8 +173,10 @@ export class Engine {
     if (missed.length) throw new Error(`Failed to enable unknown rule(s): ${missed.join(", ")}`);
     return this;
   }
-  parse(src: string, env: Env): Token[] {
+  /** Read `src`; with `stop`, up to the first top-level block whose line `stop` accepts. */
+  parse(src: string, env: Env, stop?: (line: number) => boolean): Token[] {
     const state = new StateCore(src, this, env);
+    state.stop = stop;
     for (const rule of this.core.ruler.getRules("")) rule(state);
     return state.tokens;
   }

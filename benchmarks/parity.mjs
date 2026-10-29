@@ -12,6 +12,9 @@ const sets = process.argv.find(arg => arg.startsWith("--sets="))?.slice(7).split
 const variants = ["compatible", "standard"].flatMap(syntax => [false, true].flatMap(trustedHtml => [false, true].map(lint => ({ syntax, trustedHtml, lint }))));
 const describeVariant = ({ syntax, trustedHtml, lint }) => `${syntax}${trustedHtml ? " trusted" : ""}${lint ? " lint" : ""}`;
 
+// A list's recorded item ranges extend a block's source entry; the first five
+// fields of each entry are what every version records.
+const comparable = document => Array.isArray(document.source?.blocks) ? { ...document, source: { ...document.source, blocks: document.source.blocks.map(entry => entry.slice(0, 5)) } } : document;
 // Writing without the recorded source text exercises the canonical writer.
 const canonical = document => ({ ...document, source: Object.fromEntries(Object.entries(document.source ?? {}).filter(([key]) => !["text", "blocks", "head", "trusted"].includes(key))) });
 function outcome(library, source, { lint, ...options }) {
@@ -21,7 +24,7 @@ function outcome(library, source, { lint, ...options }) {
     const written = library.stringify(document, options);
     let fresh;
     try { fresh = library.stringify(canonical(document), options); } catch (error) { fresh = `threw: ${error.message}`; }
-    return JSON.stringify({ document, diagnostics, written, fresh });
+    return JSON.stringify({ document: comparable(document), diagnostics, written, fresh });
   } catch (error) { return `threw: ${error.message}`; }
 }
 let failures = 0;
