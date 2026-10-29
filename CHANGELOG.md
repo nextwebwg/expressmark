@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.0
+
+- Read and write definition lists, as the Expressive Markdown specification
+  states them: a paragraph's first line directly followed by a `: ` line is a
+  `definitionTerm`, each `: ` line opens a `definitionDescription` holding
+  blocks, and the `definitionList` continues past blank lines into a later
+  term. A description holds the lines indented past its marker, without lazy
+  continuation, and has `tight: false` when blank lines separate its blocks.
+  Both syntaxes read them; `compatible` keeps CommonMark's lazy continuation
+  in quotes and list items, and a setext underline under a term and its `: `
+  line makes a heading there.
+- `renderHtml` renders them as `<dl>`, `<dt>` and `<dd>`; a tight
+  description's paragraphs take no `<p>`, and an empty one is `<dd></dd>`.
+- `stringify` writes a term line, `: ` descriptions with two-space
+  continuation and one blank line before each later term. Other spacing is
+  recorded as `source.markdown` and written back while it reads as the list;
+  the `prefer-canonical-definition-list` lint rule flags it. A `:` that would
+  start a marker line is written `\:`. A list that starts with a description,
+  ends with a term or is empty, a term holding a break, two adjacent lists,
+  and IDs or attributes on any of the three nodes are unsupported conversions.
+- Warn `unattached-definition-marker` for a `:` or `~` line that reads as
+  paragraph text, and `mixed-indentation` for a description whose indentation
+  mixes tabs and spaces.
+- `parseDoc` edits re-read from a definition list directly before the edited
+  block and continue through a definition list after it, since a list joins
+  the term that follows it. See nextwebwg/specs#155.
+- No document of the fixtures, the CommonMark and GFM example sets or the
+  397-README corpus reads, writes or writes canonically differently from
+  0.4.0, in both syntaxes and both HTML profiles. One README gains
+  `unattached-definition-marker` warnings for Pandoc-style descriptions after
+  a blank line. Parse time is 0.96–1.02× of 0.4.0's.
+
 ## 0.4.0
 
 - Read block quotes and list items as Parseman `lines()` runs: a line joins a

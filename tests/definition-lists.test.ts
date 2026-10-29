@@ -44,6 +44,10 @@ describe("where a definition starts", () => {
     if(source !== "- Term\n: Description") expect(read(source,"compatible").body).toEqual(body);
     else expect(read(source,"compatible").body).toEqual([{type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[lines("Term",": Description")]}]}]);
   });
+  it("leave a setext underline to `compatible`, which reads the term and its marker line as a heading", () => {
+    expect(read("Term\n: Description\n---").body).toEqual([list(term("Term"),description(paragraph("Description"))),{type:"horizontalRule"}]);
+    expect(read("Term\n: Description\n---","compatible").body).toEqual([{type:"heading",level:2,children:lines("Term",": Description").children!}]);
+  });
   it("reads a definition list in every block context", () => {
     const inner = list(term("T"),description(paragraph("d")));
     expect(read("::: note\nT\n: d\n:::").body).toEqual([{type:"container",subType:"note",body:[inner]}]);

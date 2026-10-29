@@ -52,7 +52,7 @@ with an example of both.
 | HTML blocks | CommonMark's seven HTML-block start conditions decide where raw HTML begins and ends, and the HTML inside stays raw text. |
 | Indented code | Four columns of indentation make indented code. |
 | Fence indentation | Inside a `:::` container, indentation counts from the fence's edge, as inside a code fence: each enclosed line loses up to as many leading spaces as the fence has, and a line indented four columns beyond the fence is indented code. |
-| Setext headings | A paragraph underlined with `===` or `---` is a level-1 or level-2 heading. |
+| Setext headings | A paragraph underlined with `===` or `---` is a level-1 or level-2 heading, a term and its `: ` line included. |
 | Hard breaks | Two or more trailing spaces make a hard break, as do a trailing `\` and `<br>`. |
 | Code spans in table cells | A `\|` splits the cell, inside a code span too; `\|` keeps a pipe. |
 | Lazy continuation | A paragraph continues onto a line without its quote marker or list indentation. |
