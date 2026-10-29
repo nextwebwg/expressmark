@@ -5,7 +5,7 @@
 import { Ruler } from "./ruler.js";
 import { Token } from "./token.js";
 import { asciiTrim, isSpace, normalizeReference } from "./utils.js";
-import { atxHeading, bulletMarker, fenceClose, fenceOpen, htmlBlockStart, match, orderedMarker, reach, setextUnderline, tableCells, tableDelimiterRow, thematicBreak } from "./lexicon.js";
+import { atxHeading, bulletMarker, definitionMarker, fenceClose, fenceOpen, htmlBlockStart, match, orderedMarker, reach, setextUnderline, tableCells, tableDelimiterRow, thematicBreak } from "./lexicon.js";
 import { parseLinkDestination, parseLinkTitle } from "./links.js";
 import { lines, type Combinator, type ParseContext } from "parseman";
 import type { Engine } from "./engine.js";
@@ -513,6 +513,9 @@ const itemLazy = lineCheck("lazy continuation", (state, line, pos) => {
   return marker && state.sCount[line]! - state.listIndent < 4 ? -1 : pos;
 });
 const item = lines(itemPrefix, runBody, { first: itemFirst, lazy: itemLazy });
+// A description's first line ends at its marker; later lines belong when blank
+// or indented past the marker. No line joins lazily.
+const description = lines(itemPrefix, runBody, { first: itemFirst });
 
 /** Read a list item's blocks: the run of lines from `line`, whose marker ends at `markerEnd`. */
 export function readItem(state: StateBlock, line: number, endLine: number, markerEnd: number, empty: boolean): void {
@@ -694,6 +697,106 @@ const list: BlockRule = (state, startLine, endLine, silent) => {
   return true;
 };
 
+// ---- Definition lists
+//
+// A term is a paragraph's first line whose next line is a marker line: `:`
+// then a space, a tab or the line end, after any block-relative indentation.
+// The rule runs after every other block start, so a line that starts another
+// block is never a term, and a marker line never interrupts a paragraph, so
+// only a paragraph's first line is one. Each description reads a run of lines
+// as a relative list item does, without lazy continuation. A description's run
+// takes the blank lines after it, so when a term follows a list after any
+// blank lines, the list's close is the last token, and the term reopens it.
+
+/** Where a marker line's `:` ends, or -1. */
+function markerEnd(state: StateBlock, line: number, endLine: number): number {
+  if (line >= endLine || state.sCount[line]! < state.blkIndent) return -1;
+  return reach(definitionMarker, state.src, state.bMarks[line]! + state.tShift[line]!);
+}
+const leadOf = (state: StateBlock, line: number) => state.src.slice(state.bMarks[line]!, state.bMarks[line]! + state.tShift[line]!);
+const lastContent = (state: StateBlock, from: number, end: number) => { while (end > from + 1 && state.isEmpty(end - 1)) end--; return end; };
+
+/**
+ * Read the description whose marker on `line` ends at `after`. Returns the
+ * description in the preferred form, `: ` and two-space continuation, or
+ * undefined when its first line is empty but later lines are not.
+ */
+function readDescription(state: StateBlock, line: number, endLine: number, after: number): string | undefined {
+  const max = state.eMarks[line]!;
+  let offset = state.sCount[line]! + 1, pos = after;
+  for (; pos < max; pos++) {
+    const code = state.src.charCodeAt(pos);
+    if (code === 0x09) offset += 4 - (offset + state.bsCount[line]!) % 4;
+    else if (code === 0x20) offset++;
+    else break;
+  }
+  const open = state.push("dd_open", "dd", 1);
+  const map: [number, number] = [line, 0];
+  open.map = map;
+  const lead = leadOf(state, line);
+  const saved = { blkIndent: state.blkIndent, tight: state.tight, bMark: state.bMarks[line]!, tShift: state.tShift[line]!, sCount: state.sCount[line]! };
+  // Every line indented past the marker belongs, as in a relative list item;
+  // the first line starts at its content.
+  state.blkIndent = saved.sCount + 1;
+  state.bMarks[line] = pos; state.tShift[line] = 0; state.sCount[line] = offset;
+  state.tight = true;
+  readRun(state, description, line, endLine, after, end => state.md.block.tokenize(state, line, end));
+  const tight = state.tight;
+  state.blkIndent = saved.blkIndent; state.tight = saved.tight;
+  state.bMarks[line] = saved.bMark; state.tShift[line] = saved.tShift; state.sCount[line] = saved.sCount;
+  let mixed = false;
+  for (let index = line + 1; index < state.line; index++) {
+    const own = leadOf(state, index);
+    if (!state.isEmpty(index) && !own.startsWith(lead) && !lead.startsWith(own)) mixed = true;
+  }
+  if (!tight || mixed) open.meta = { ...(tight ? {} : { loose: true }), ...(mixed ? { mixed: true } : {}) };
+  state.push("dd_close", "dd", -1);
+  map[1] = state.line;
+  const first = state.src.slice(pos, max), rest = state.getLines(line + 1, lastContent(state, line, state.line), offset, false);
+  if (!first) return rest ? undefined : ":";
+  return `: ${rest ? `${first}\n${rest}`.replace(/\n(?=[^\n])/g, "\n  ") : first}`;
+}
+
+/**
+ * The authored source of a list's groups, and whether every group so far is
+ * in the preferred form: a term, its descriptions on the following lines, and
+ * one blank line before each later term.
+ */
+interface ListSource { column: number; chunks: string[]; preferred: boolean; last: number }
+const definitionList: BlockRule = (state, startLine, endLine, silent) => {
+  if (silent || markerEnd(state, startLine + 1, endLine) < 0) return false;
+  const last = state.tokens.at(-1);
+  let map: [number, number], source: ListSource;
+  if (last?.type === "dl_close" && last.level === state.level) {
+    state.tokens.pop(); state.level++;
+    map = last.map!; source = last.meta as unknown as ListSource;
+  } else {
+    map = [startLine, 0];
+    source = { column: state.sCount[startLine]!, chunks: [], preferred: true, last: startLine };
+    state.push("dl_open", "dl", 1).map = map;
+  }
+  state.push("dt_open", "dt", 1).map = [startLine, startLine + 1];
+  const inline = state.push("inline", "", 0);
+  const term = asciiTrim(state.lineText(startLine));
+  inline.content = term; inline.map = [startLine, startLine + 1]; inline.children = [];
+  state.push("dt_close", "dt", -1);
+  let line = startLine + 1, preferred: string | undefined = term;
+  for (let after: number; (after = markerEnd(state, line, endLine)) >= 0; line = state.line) {
+    const written = readDescription(state, line, endLine, after);
+    preferred = preferred === undefined || written === undefined ? undefined : `${preferred}\n${written}`;
+  }
+  const end = lastContent(state, startLine, line);
+  const from = source.chunks.length ? source.last : startLine;
+  const chunk = state.getLines(from, end, source.column, false);
+  source.chunks.push(chunk);
+  source.preferred &&= preferred !== undefined && chunk === (source.chunks.length > 1 ? `\n${preferred}` : preferred);
+  source.last = end;
+  const close = state.push("dl_close", "dl", -1);
+  close.map = map; close.meta = source as unknown as Record<string, unknown>;
+  map[1] = state.line = line;
+  return true;
+};
+
 export class ParserBlock {
   ruler = new Ruler<BlockRule>();
   constructor() {
@@ -708,6 +811,7 @@ export class ParserBlock {
       ["html_block", html_block, ["paragraph", "reference", "blockquote"]],
       ["heading", heading, ["paragraph", "reference", "blockquote"]],
       ["lheading", lheading],
+      ["definition_list", definitionList],
       ["paragraph", paragraph],
     ];
     for (const [name, fn, alt] of rules) this.ruler.push(name, fn, { alt: alt ?? [] });
@@ -715,7 +819,8 @@ export class ParserBlock {
   tokenize(state: StateBlock, startLine: number, endLine: number): void {
     const rules = this.ruler.getRules("");
     const maxNesting = state.md.options.maxNesting;
-    let line = startLine, hasEmptyLines = false;
+    // `before`: whether blank lines came before the current block began.
+    let line = startLine, hasEmptyLines = false, before = false;
     while (line < endLine) {
       state.line = line = state.skipEmptyLines(line);
       if (line >= endLine || state.sCount[line]! < state.blkIndent) break;
@@ -729,9 +834,13 @@ export class ParserBlock {
         if (ok) { if (prevLine >= state.line) throw new Error("block rule didn't increment state.line"); break; }
       }
       if (!ok) throw new Error("none of the block rules matched");
-      // A block followed by a blank line loosens its list.
-      state.tight = !hasEmptyLines;
-      if (state.isEmpty(state.line - 1)) hasEmptyLines = true;
+      // A block followed by a blank line loosens its list. A term that
+      // continues the definition list before it adds to that block, so the
+      // blank lines between its groups loosen nothing.
+      const last = state.tokens[state.tokens.length - 1];
+      if (last?.type !== "dl_close" || last.map![0] >= line) before = hasEmptyLines;
+      state.tight = !before;
+      hasEmptyLines = before || state.isEmpty(state.line - 1);
       line = state.line;
       if (line < endLine && state.isEmpty(line)) { hasEmptyLines = true; state.line = ++line; }
     }

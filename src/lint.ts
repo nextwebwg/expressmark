@@ -39,6 +39,7 @@ export const lintRules: readonly Rule[] = [
   { code: "prefer-named-table", type: "table", holds: node => has("form", "pipe")(node) || has("form", "positional")(node), preferred: "::: table with named fields", fix: drop("form", "markdown") },
   { code: "prefer-bracketed-mention", type: "inline", holds: node => node.subType === "mention" && has("form", "bare")(node), preferred: "@[label]", fix: drop("form") },
   { code: "prefer-canonical-line-block", type: "lineBlock", holds: has("markdown"), preferred: "| lines", fix: drop("markdown") },
+  { code: "prefer-canonical-definition-list", type: "definitionList", holds: has("markdown"), preferred: "a term line, then : descriptions with two-space continuation, and one blank line before each later term", fix: drop("markdown") },
 ];
 /** Lint codes, each a rule `options.lint` can turn off by name. */
 export type LintCode = (typeof lintRules)[number]["code"];

@@ -53,6 +53,9 @@ export const bulletMarker: Combinator<string> = regex(/[*+-](?=[ \t\n]|$)/);
 /** An ordered marker: one to nine digits and `.` or `)`, then a space, a tab or the line end. */
 export const orderedMarker: Combinator<string> = regex(/[0-9]{1,9}[.)](?=[ \t\n]|$)/);
 
+/** A definition list's marker: one `:`, then a space, a tab or the line end. */
+export const definitionMarker: Combinator<string> = regex(/:(?=[ \t\n]|$)/);
+
 /** A setext underline: a run of `=` or `-` and trailing spaces. */
 export const setextUnderline: Combinator<string> = transform(sequence(regex(/=+|-+/), regex(/[ \t]*/), lineEnd), ([run]) => run);
 

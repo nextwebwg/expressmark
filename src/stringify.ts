@@ -33,10 +33,10 @@ function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {})
 const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","open","close","syntax","version","metadata"]);
 const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","open","close","syntax","version","metadata"];
 const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
-const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition","strayFence"]);
+const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition","definitionList","strayFence"]);
 const structural: Record<string,string[]> = {
     document:["version","metadata","syntax"], htmlElement:["tag","open","close","tight","display"], footnoteReference:["label"], footnoteDefinition:["label"],
-    container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked","tight"],
+    container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked","tight"], definitionDescription:["tight"],
     link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
 };
 function validate(node: Node, path = "document", seen = new Set<Node>()): void {
@@ -65,13 +65,21 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.titleSpelling !== undefined && !["bracketed","unbracketed"].includes(node.titleSpelling)) fail(`${path}.titleSpelling needs bracketed or unbracketed.`);
   if(node.spelling !== undefined && !["container","alert"].includes(node.spelling)) fail(`${path}.spelling needs container or alert.`);
   if(node.ref !== undefined && node.subType !== "mention") fail(`${path}.ref is only defined for mentions.`);
-  if(["document","container","blockquote","listItem","footnoteDefinition"].includes(node.type) && !Array.isArray(node.body)) fail(`${path} needs a block body.`);
+  if(["document","container","blockquote","listItem","footnoteDefinition","definitionDescription"].includes(node.type) && !Array.isArray(node.body)) fail(`${path} needs a block body.`);
   if(["footnoteReference","footnoteDefinition"].includes(node.type)) {
     if(typeof node.label !== "string" || tokenHandle(node.label) !== node.label) fail(`${path}.label needs a footnote label.`);
     if(node.id !== undefined || node.attributes) fail(`${path} has no footnote attribute source mapping.`);
   }
-  if(["list","table","tableRow"].includes(node.type) && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
-  if(["paragraph","heading","title","emphasis","strong","delete","underline","highlight","lineBlock","link","linkReference","tableCell"].includes(node.type) && node.value == null && node.children == null && !(node.type === "tableCell" && node.body)) fail(`${path} needs content.`);
+  if(["list","table","tableRow","definitionList"].includes(node.type) && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
+  if(node.type === "definitionList") {
+    // Each group is a term, then one or more descriptions.
+    const kinds=node.children!.map(child=>child.type === "definitionTerm" ? "t" : child.type === "definitionDescription" ? "d" : "x").join("");
+    if(!/^(?:td+)+$/.test(kinds)) fail(`${path} needs groups of a definitionTerm and its definitionDescription nodes.`);
+  }
+  if(["definitionList","definitionTerm","definitionDescription"].includes(node.type) && (node.id !== undefined || node.attributes)) fail(`${path} has no definition list attribute source mapping.`);
+  if(node.type === "definitionTerm" && JSON.stringify(node.children ?? []).match(/"type":"(?:soft)?[bB]reak"/)) fail(`${path} needs one line: a term holds no break.`);
+  if(node.body?.some((child,index)=>child.type === "definitionList" && node.body![index-1]?.type === "definitionList")) fail(`${path} holds adjacent definition lists, which read back as one.`);
+  if(["paragraph","heading","title","emphasis","strong","delete","underline","highlight","lineBlock","link","linkReference","tableCell","definitionTerm"].includes(node.type) && node.value == null && node.children == null && !(node.type === "tableCell" && node.body)) fail(`${path} needs content.`);
   if(node.type === "strayFence" && !/^:{3,}$/.test(node.value ?? "")) fail(`${path} needs a bare colon fence value.`);
   if(["text","inlineCode","code","html","literal","strayFence"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
   if(["definition","linkReference","imageReference"].includes(node.type)) {
@@ -87,7 +95,7 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal","htmlElement"].includes(child.type) && child.display === "inline";
   const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal","htmlElement"].includes(child.type) && child.display === "block";
   if(node.body?.some(child=>!isBlock(child))) fail(`${path}.body needs block nodes.`);
-  if(node.children && !["list","table","tableRow","group"].includes(node.type) && node.children.some(child=>!isInline(child))) fail(`${path}.children needs inline nodes.`);
+  if(node.children && !["list","table","tableRow","group","definitionList"].includes(node.type) && node.children.some(child=>!isInline(child))) fail(`${path}.children needs inline nodes.`);
   if(["link","image","definition"].includes(node.type) && typeof node.url !== "string") fail(`${path} needs a string URL.`);
   if(["image","imageReference"].includes(node.type) && typeof node.alt !== "string") fail(`${path} needs string alternative text.`);
   if(node.type === "lineBlock" && node.value?.includes("\n")) fail(`${path} cannot store represented line boundaries in a literal value.`);
@@ -186,7 +194,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         children[children.length-1]={...previous,value:previous.value!+child.value!};
       } else children.push(child);
     }
-    const textContext: TextContext={...context,footnotes,references,block:["paragraph","tableCell"].includes(node.type),heading:node.type === "heading"};
+    const textContext: TextContext={...context,footnotes,references,block:["paragraph","tableCell","definitionTerm"].includes(node.type),heading:node.type === "heading"};
     return node.value !== undefined ? escapeText(node.value,textContext) : children.map((child,index)=>inline(child,children[index-1],children[index+1],textContext)).join("");
   }
   function caption(node: Node): string {
@@ -492,9 +500,12 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     return `${colons} ${heading}\n\n${body}${body ? "\n\n":""}${colons}`;
   }
   const elementTag=(open: string) => options.trustedHtml || open.startsWith("</") ? open : sanitizeStartTag(open,options);
-  function block(node: Node, forceTabsWrapper = false): string {
+  function block(node: Node, forceTabsWrapper = false, previous?: Node): string {
     if(node.type === "paragraph") {
-      const value=content(node);
+      // A `:` line after the first line would make that line a term, and one
+      // starting the paragraph would add a description to a list before it.
+      let value=content(node).replace(/^([^\n]*\n[ \t]*):(?=[ \t\n]|$)/,"$1\\:");
+      if(previous?.type === "definitionList") value=value.replace(/^:(?=[ \t\n]|$)/,"\\:");
       return node.id !== undefined || node.attributes || !value.trim() ? safeNative(node):value;
     }
     if(node.type === "heading") {
@@ -538,6 +549,21 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return text.split("\n").map(value=>`> ${value}`).join("\n");
     }
     if(node.type === "list") return list(node);
+    if(node.type === "definitionList") {
+      const authored=spelling(node,"markdown");
+      if(authored && reads(authored,node,undefined,"markdown")) return authored;
+      return node.children!.map((child,index)=> {
+        if(child.type === "definitionDescription") {
+          const text=blockArray(child.body ?? [],child.tight !== false);
+          return text ? `: ${text.replace(/\n(?=[^\n])/g,"\n  ")}` : ":";
+        }
+        // A later term starting with a marker would add a description to the term before it.
+        let term=content(child);
+        if(index) term=term.replace(/^:(?=[ \t]|$)/,"\\:");
+        if(!term.trim() || term.includes("\n")) fail("A definition term needs one line of text.");
+        return `${index ? "\n":""}${term}`;
+      }).join("\n");
+    }
     if(node.type === "htmlElement") {
       const authored=spelling(node,"markdown");
       // A matching source hash proves the node is unedited, not that the
@@ -617,7 +643,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const blocks=nodes.map((node,index)=> {
       const neighboringTabs=node.type === "container" && node.subType === "tabs"
         && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
-      return {node,value:block(node,neighboringTabs)};
+      return {node,value:block(node,neighboringTabs,nodes[index-1])};
     }).filter(({value})=>Boolean(value));
     // A blank line between an item's blocks would loosen its list.
     return blocks.map(({node,value},index)=> {
@@ -697,7 +723,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         continue;
       }
       const neighboringTabs=node.type === "container" && node.subType === "tabs" && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
-      const value=block(node,neighboringTabs);
+      const value=block(node,neighboringTabs,nodes[index-1]);
       if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; }
       index++;
     }

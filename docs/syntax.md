@@ -52,7 +52,7 @@ with an example of both.
 | HTML blocks | CommonMark's seven HTML-block start conditions decide where raw HTML begins and ends, and the HTML inside stays raw text. |
 | Indented code | Four columns of indentation make indented code. |
 | Fence indentation | Inside a `:::` container, indentation counts from the fence's edge, as inside a code fence: each enclosed line loses up to as many leading spaces as the fence has, and a line indented four columns beyond the fence is indented code. |
-| Setext headings | A paragraph underlined with `===` or `---` is a level-1 or level-2 heading. |
+| Setext headings | A paragraph underlined with `===` or `---` is a level-1 or level-2 heading, a term and its `: ` line included. |
 | Hard breaks | Two or more trailing spaces make a hard break, as do a trailing `\` and `<br>`. |
 | Code spans in table cells | A `\|` splits the cell, inside a code span too; `\|` keeps a pipe. |
 | Lazy continuation | A paragraph continues onto a line without its quote marker or list indentation. |
@@ -97,12 +97,15 @@ Markdown.
 ## Expressive Markdown extensions in `compatible` documents
 
 Containers, leaf and inline directives, bracketed spans, alerts, footnotes, line
-blocks, list tables and attribute lists have the same syntax in both. Their
-content is Markdown read with the document's syntax, so inside a `compatible`
-container indented code, setext headings and lazy continuation behave as
-CommonMark's do, with indentation counted from the fence's edge. An alert is a
-block quote, so it continues lazily in `compatible` and needs `>` on every line
-in `standard`.
+blocks, definition lists, list tables and attribute lists have the same syntax
+in both. Their content is Markdown read with the document's syntax, so inside a
+`compatible` container indented code, setext headings and lazy continuation
+behave as CommonMark's do, with indentation counted from the fence's edge. An
+alert is a block quote, so it continues lazily in `compatible` and needs `>` on
+every line in `standard`. A definition list's description has no lazy
+continuation in either syntax: an unindented line ends it. In `compatible`, a
+list item or quote paragraph still continues lazily onto a `: ` line, which then
+reads as paragraph text.
 
 ## Moving a document to `standard`
 
@@ -128,7 +131,8 @@ the specification intends, and are worth checking when a document moves:
 | --- | --- | --- |
 | `invalid-syntax` | both | The frontmatter `markdownSyntax` value is not `standard` or `compatible`. |
 | `duplicate-definition` | both | A link reference label is defined more than once. `standard` uses the last definition, `compatible` the first. |
-| `mixed-indentation` | both | A list's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `standard`, and as a [lint rule](lint.md) in `compatible`. |
+| `mixed-indentation` | both | A list's or a description's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `standard`, and for a list as a [lint rule](lint.md) in `compatible`. |
+| `unattached-definition-marker` | both | A line starting with `:` or `~` and a space, a tab or the line end reads as paragraph text: a later line of a paragraph, or a paragraph after a one-line paragraph and a blank line. |
 | `unclosed-html-element` | `standard` | An element has no closing tag; it ends at its first blank line, or with its paragraph. |
 | `stray-end-tag` | both | An end tag closes no open element and is ignored. |
 | `br-end-tag` | both | `</br>` is read as `<br>`; write `<br>`. A [lint rule](lint.md). |

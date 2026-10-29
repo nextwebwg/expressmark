@@ -222,6 +222,10 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       }
       // Form controls are outside the safe profile, so task status stays inert.
       // A tight list's paragraphs render without <p>, as CommonMark's do.
+      // A description renders its blocks as a list item does: tight, its paragraphs take no <p>.
+      case "definitionList": return element(node, "dl", content(node));
+      case "definitionTerm": return element(node, "dt", content(node));
+      case "definitionDescription": return element(node, "dd", node.tight === false ? content(node) : unwrapped(node));
       case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${tight.at(-1) && node.tight !== false ? unwrapped(node) : content(node)}`);
       // An element's paragraphs take `<p>` when blank lines separate its blocks.
       // An unclosed element closes where its enclosing block ends.
