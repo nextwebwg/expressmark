@@ -8,6 +8,8 @@ import { installStandard, standardRules, type StandardRule } from "./standard.js
 import type { ConversionOptions, Document, Json, Node, Position, Syntax } from "./types.js";
 import { linting, validateSyntax, warn } from "./types.js";
 import { lint } from "./lint.js";
+import { stringify } from "./stringify.js";
+import type { ListSource } from "./markdown/block.js";
 
 function line(state: StateBlock, index: number): string {
   return state.src.slice(state.bMarks[index]! + state.tShift[index]!, state.eMarks[index]);
@@ -172,6 +174,8 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
   const defined=new Set<string>();
   const env: Record<string,unknown> = {hooks,options};
   const tasks=new WeakMap<Node,RegExpExecArray>();
+  // The definition lists this reading made, whose authored lines the writer then checks.
+  const definitionLists: Node[]=[];
   // A top-level list's items' source lines, for writing an edited list back item by item.
   const itemLines=new WeakMap<Node,[number,number][]>();
   let source = markdown.charCodeAt(0) === 0xfeff ? markdown.slice(1) : markdown;
@@ -593,7 +597,8 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     const inner=tokens.slice(at+1,index);
     return {nodes:elementNodes(tag.name,raw,closed<0 ? undefined:tokens[closed]!.content,"inline",{children:inlineTokens(inner,lineBlock)}),next:closed<0 ? index:closed+1};
   }
-  function inlineTokens(tokens: Token[], lineBlock = false): Node[] {
+  // In a term, `<br>` is an element: a term is one line and holds no break.
+  function inlineTokens(tokens: Token[], lineBlock = false, term = false): Node[] {
     let cursor=0;
     function read(until?:string): Node[] {
       const nodes: Node[]=[];
@@ -638,6 +643,7 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
           const meta=token.meta as {name:string;open:string;close?:string;value:string};
           nodes.push(...elementNodes(meta.name,meta.open,meta.close,"inline",{value:meta.value}));
         } else if(token.type === "html_inline" && standard.has("html")) { const found=inlineElement(tokens,cursor-1,lineBlock); nodes.push(...found.nodes); cursor=found.next; }
+        else if(token.type === "html_inline" && term && /^<\/?br[\s/>]/i.test(token.content)) nodes.push(...elementNodes("br",token.content,undefined,"inline",{}));
         else if(token.type === "html_inline" && options.trustedHtml) { if(/^<\/br[\s>]/i.test(token.content)) if(linting(options.lint,"br-end-tag")) options.onDiagnostic?.({code:"br-end-tag",message:"</br> is read as <br>; write <br>.",severity:"warning",preferred:"<br>"}); nodes.push({type:"html",display:"inline",value:token.content}); }
         else if(token.type === "html_inline") {
           const open=/^<([a-z][\w:-]*)\b[^>]*>$/i.exec(token.content);
@@ -655,7 +661,7 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
               const wrappers=htmlNodes(`${token.content}${marker}${tokens[end]!.content}`,"inline",options);
               // Sanitize the HTML shell first. Its safe content slot is populated with
               // already-parsed Markdown nodes, so extensions and literal code survive.
-              const inner=inlineTokens(tokens.slice(cursor,end),lineBlock);
+              const inner=inlineTokens(tokens.slice(cursor,end),lineBlock,term);
               function populate(node: Node): Node[] {
                 if(node.value === marker) {
                   if(node.type === "text") return inner;
@@ -713,15 +719,11 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
         }
         if(options.lint || depth === 1) place(nodes,made.at,made.map);
       };
-      // The previous block is a one-line paragraph, for the unattached-marker warning.
-      let oneLine=false;
       while(cursor<tokens.length) {
         finish();
         const token=tokens[cursor++]!;
         if(token.type === until) break;
         made={at:nodes.length,map:token.map};
-        const afterOneLine=oneLine;
-        oneLine=token.type === "paragraph_open" && !!token.map && token.map[1] === token.map[0]+1;
         if(token.type === "paragraph_open" || token.type === "heading_open") {
           const inner=tokens[cursor++]!;
           let content=inner.content;
@@ -756,9 +758,9 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
           }
           if(token.type === "paragraph_open") {
             const task=/^\[([ xX])\][ \t]+/.exec(content); if(task) tasks.set(node,task);
-            // A `:` or `~` line that reads as text, where an author may have meant a description.
-            if(options.onDiagnostic && (/\n[ \t]*[:~](?:[ \t\n]|$)/.test(content) || afterOneLine && /^[:~](?:[ \t\n]|$)/.test(content)))
-              warn(options,"unattached-definition-marker","A line starting with : or ~ is paragraph text here. A description's : line directly follows its one-line term.");
+            // Each `:` or `~` line that reads as text, where an author may have meant a description.
+            if(options.onDiagnostic) for(const _line of content.matchAll(/^[ \t]*[:~](?:[ \t]|$)/gm))
+              warn(options,"unattached-definition-marker","A line starting with : or ~ is paragraph text here. A description's : line directly follows its term's line.");
           }
           cursor++; nodes.push(node);
         } else if(token.type === "blockquote_open") {
@@ -920,10 +922,14 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
         }
         else if(token.type === "dl_open") {
           const node: Node={type:"definitionList",children:read("dl_close")};
-          const source=tokens[cursor-1]!.meta as {preferred:boolean;chunks:string[]};
-          if(!source.preferred) spell(node,"markdown",source.chunks.join("\n"));
+          // The authored lines, indented from the list's least indented line;
+          // the spelling is kept only where the writer would write otherwise.
+          const {lines}=tokens[cursor-1]!.meta as unknown as ListSource;
+          const base=Math.min(...lines.map(line=>line ? line[0] : Infinity));
+          spell(node,"markdown",lines.map(line=>line ? " ".repeat(line[0]-base)+line[1] : "").join("\n"));
+          definitionLists.push(node);
           nodes.push(node);
-        } else if(token.type === "dt_open") { nodes.push(compact({type:"definitionTerm"},inlineTokens(tokens[cursor]!.children!))); cursor+=2; }
+        } else if(token.type === "dt_open") { nodes.push(compact({type:"definitionTerm"},inlineTokens(tokens[cursor]!.children!,false,true))); cursor+=2; }
         else if(token.type === "dd_open") {
           if(token.meta?.mixed) warn(options,"mixed-indentation","A description mixes tabs and spaces in its indentation; tabs count to the next multiple of four columns.");
           const node: Node={type:"definitionDescription",body:read("dd_close")};
@@ -1181,6 +1187,15 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     if(typeof document.title === "object" && document.title !== null) fences(document.title);
     fresh.forEach(fences); rememberSpellings(document);
   } else if(spelled) fences(document);
+  // A definition list's authored lines are a spelling only where the writer
+  // would write the list otherwise.
+  for(const node of definitionLists) {
+    const {markdown: authored,...rest}=node.source!;
+    const bare: Node={...node}; if(Object.keys(rest).length) bare.source=rest; else delete bare.source;
+    let written: string | undefined;
+    try { written=stringify({type:"document",version:1,body:[bare],...(syntax === "compatible" ? {syntax}:{})},{syntax,...(options.trustedHtml ? {trustedHtml:true}:{})}); } catch { /* an unwritable list keeps its lines */ }
+    if(written === `${authored}\n`) { if(bare.source) node.source=bare.source; else delete node.source; }
+  }
   // CommonMark's HTML blocks can split an element, so stray end tags are found across the document.
   if(!standard.has("html") && options.onDiagnostic) {
     const values: string[]=[];

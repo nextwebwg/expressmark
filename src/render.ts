@@ -2,7 +2,7 @@ import { Parser } from "htmlparser2";
 import { headingAnchors } from "./anchors.js";
 import { allowedElement, escapeHtml, normalizeTags, rawTextElements, readStartTag, sanitizeHtml, voidElements, type HtmlAllowlist } from "./html.js";
 import { footnoteDefinitions, linkDefinitions, references, referenceOrder } from "./references.js";
-import { normalizeLabel } from "./grammar.js";
+import { definitionGroups, normalizeLabel } from "./grammar.js";
 import { sourceKey } from "./grammar.js";
 import { ConversionError, warn, type ConversionOptions, type Document, type Node } from "./types.js";
 
@@ -223,7 +223,9 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       // Form controls are outside the safe profile, so task status stays inert.
       // A tight list's paragraphs render without <p>, as CommonMark's do.
       // A description renders its blocks as a list item does: tight, its paragraphs take no <p>.
-      case "definitionList": return element(node, "dl", content(node));
+      case "definitionList":
+        if (!definitionGroups(node)) warn(diagnostics, "invalid-definition-list", "A definition list needs groups of a term and its descriptions; it starts with a description, ends with a term or is empty.");
+        return element(node, "dl", content(node));
       case "definitionTerm": return element(node, "dt", content(node));
       case "definitionDescription": return element(node, "dd", node.tight === false ? content(node) : unwrapped(node));
       case "listItem": return element(node, "li", `${node.checked === undefined ? "" : node.checked ? "☑ " : "☐ "}${tight.at(-1) && node.tight !== false ? unwrapped(node) : content(node)}`);

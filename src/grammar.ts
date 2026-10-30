@@ -180,6 +180,10 @@ export function writeAttributes(node: Node, extra: Attributes = {}): string {
 export function normalizeLabel(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase().toUpperCase();
 }
+/** Whether a definition list's children are groups: a term, then one or more descriptions. */
+export function definitionGroups(node: Node): boolean {
+  return /^(?:td+)+$/.test((node.children ?? []).map(child => child.type === "definitionTerm" ? "t" : child.type === "definitionDescription" ? "d" : "x").join(""));
+}
 export function plainText(node: Node): string {
   if (node.type === "break" || node.type === "softBreak") return " ";
   if (node.type === "image" || node.type === "imageReference") return node.alt ?? "";

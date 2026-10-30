@@ -58,6 +58,20 @@ describe("parseDoc", () => {
     expect(merged.document).toEqual(parse("T\n: a\n\nV\n: v\n\nU\n: u\n", { syntax }));
     expect(merged.document.body).toHaveLength(1);
   });
+  // Blocks that continue past blank lines: an edit before them re-reads until they end.
+  it.each([
+    ["A\n\n: x\n", "A", "A\n: d"],
+    ["A\n\n  more\n", "A", "A\n: d"],
+    ["T\n: d\n\nP\n\n: x\n", "P\n\n", ""],
+    ["a\n\n  more\n", "a", "- a"],
+    ["- a\n\nx\n", "x", "  x"],
+  ])("reads an edit of %j as a full read does", (source, find, replacement) => {
+    for (const syntax of ["compatible", "standard"] as const) {
+      const at = source.indexOf(find);
+      const edited = parseDoc(source, { syntax }).edit(at, at + find.length, replacement);
+      expect(edited.document).toEqual(parse(source.slice(0, at) + replacement + source.slice(at + find.length), { syntax }));
+    }
+  });
   it("refuses a range outside the text", () => {
     const doc = parseDoc("text");
     expect(() => doc.edit(2, 1, "")).toThrow(RangeError);

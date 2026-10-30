@@ -52,7 +52,7 @@ with an example of both.
 | HTML blocks | CommonMark's seven HTML-block start conditions decide where raw HTML begins and ends, and the HTML inside stays raw text. |
 | Indented code | Four columns of indentation make indented code. |
 | Fence indentation | Inside a `:::` container, indentation counts from the fence's edge, as inside a code fence: each enclosed line loses up to as many leading spaces as the fence has, and a line indented four columns beyond the fence is indented code. |
-| Setext headings | A paragraph underlined with `===` or `---` is a level-1 or level-2 heading, a term and its `: ` line included. |
+| Setext headings | A paragraph underlined with `===` or `---` is a level-1 or level-2 heading. A setext underline also takes a definition list above it: every line, the term, its `: ` lines and their continuation lines included, becomes the heading's text, so `Term`, `: d`, `: e`, `---` is a level-2 heading whose text is the three lines `Term`, `: d` and `: e`. |
 | Hard breaks | Two or more trailing spaces make a hard break, as do a trailing `\` and `<br>`. |
 | Code spans in table cells | A `\|` splits the cell, inside a code span too; `\|` keeps a pipe. |
 | Lazy continuation | A paragraph continues onto a line without its quote marker or list indentation. |
@@ -132,7 +132,8 @@ the specification intends, and are worth checking when a document moves:
 | `invalid-syntax` | both | The frontmatter `markdownSyntax` value is not `standard` or `compatible`. |
 | `duplicate-definition` | both | A link reference label is defined more than once. `standard` uses the last definition, `compatible` the first. |
 | `mixed-indentation` | both | A list's or a description's indentation mixes tabs and spaces so that neither line's indentation starts with the other's; tabs count to the next multiple of four columns. Always reported in `standard`, and for a list as a [lint rule](lint.md) in `compatible`. |
-| `unattached-definition-marker` | both | A line starting with `:` or `~` and a space, a tab or the line end reads as paragraph text: a later line of a paragraph, or a paragraph after a one-line paragraph and a blank line. |
+| `unattached-definition-marker` | both | A line starting with `:` or `~` and a space, a tab or the line end reads as paragraph text; each such line warns. |
+| `invalid-definition-list` | both | `renderHtml` was given a definition list that starts with a description, ends with a term or is empty; it renders it as given. `stringify` reports the same list as unsupported conversion. |
 | `unclosed-html-element` | `standard` | An element has no closing tag; it ends at its first blank line, or with its paragraph. |
 | `stray-end-tag` | both | An end tag closes no open element and is ignored. |
 | `br-end-tag` | both | `</br>` is read as `<br>`; write `<br>`. A [lint rule](lint.md). |

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.2
+
+- A marker line is never a term: `: x` followed by `: d` is one paragraph.
+- A `<br>` in a term reads as an inline `br` element in both syntaxes, so a
+  term is one line and holds no `break`.
+- `unattached-definition-marker` warns for each `:` or `~` line that reads as
+  paragraph text, such as `: Description` after a heading, or after a quote
+  or list item in `standard`.
+- A definition list records its authored lines in `source.markdown` wherever
+  the writer would write the list otherwise, term and continuation
+  indentation included, and keeps them when the block holding it is
+  rewritten. `prefer-canonical-definition-list` flags exactly what
+  `preferredForms` rewrites.
+- `stringify` writes an unedited block canonically when its source would read
+  as part of the edited block before it, such as a `: x` paragraph after a new
+  definition list. It reports a term with leading or trailing whitespace, an
+  empty term or one spanning lines as unsupported conversion, and protects a
+  `:` that starts any term.
+- `renderHtml` reports `invalid-definition-list` for a list that starts with
+  a description, ends with a term or is empty.
+- See nextwebwg/specs#155.
+
 ## 0.5.1
 
 - Keep enclosing block-quote markers out of pipe-table merge detection and column counts, so ordinary and merged tables inside quotes remain editable tables. Ragged merged rows still report a diagnostic and retain their source.
