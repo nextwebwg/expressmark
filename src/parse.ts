@@ -963,8 +963,9 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
           }) ?? [];
           const table: Node={type:"table",children:rows};
           if(alignment.some(Boolean)) table.align=alignment;
-          const originalRows=token.map ? lines().slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(splitRow) : rawCells;
-          const hasMerges=originalRows.some(row=>row.some(cell=>/^[>^]$/.test(cell.trim())));
+          const originalRows=token.map ? lines().slice(token.map[0],token.map[1]).filter((_row,index)=>index !== 1).map(line=>splitRow(line.replace(/^(?:[ \t]*>[ \t]?)+/,""))) : rawCells;
+          // Quote prefixes belong to the enclosing block, never to a cell or merge marker.
+          const hasMerges=rawCells.some(row=>row.some(cell=>/^[>^]$/.test(cell.trim())));
           // Lint: `\|` in a cell's code span, which `standard` syntax keeps as written.
           if(token.map && original === topSource && !standard.has("tableCode") && linting(options.lint,"table-code-pipe") && /`[^`\n]*\\\|[^`\n]*`/.test(lines().slice(token.map[0],token.map[1]).join("\n")))
             options.onDiagnostic?.({code:"table-code-pipe",message:"A code span in this table writes \\| for a pipe; in standard syntax the backslash shows, so write |.",severity:"warning",preferred:"| inside the code span",position:{start:{line:token.map[0]+lineOffset+1,column:1},end:{line:token.map[1]+lineOffset,column:lineAt(token.map[1]-1).length+1}}});

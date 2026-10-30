@@ -117,3 +117,25 @@ cases("GFM 6: links, images and autolinks", [
   {name:"autolinks balance parentheses and exclude the surrounding closer",source:"(https://example.com/api(v2))",body:[{type:"paragraph",children:[text("("),{type:"link",url:"https://example.com/api(v2)",value:"https://example.com/api(v2)"},text(")")]}]},
   {name:"code spans suppress automatic links",source:"`https://example.com editor@example.com`",body:[{type:"paragraph",children:[{type:"inlineCode",value:"https://example.com editor@example.com"}]}]},
 ]);
+
+
+describe("quoted pipe tables", () => {
+  it.each(["> ", "> > "])("keeps quote markers out of merge validation: %s", prefix => {
+    const source = ["| Name | Status |", "| --- | --- |", "| Example | Ready |"].map(line => prefix + line).join("\n");
+    const diagnostics: unknown[] = [];
+    const document = parse(source, { onDiagnostic: diagnostic => diagnostics.push(diagnostic) });
+    let node = document.body[0]!;
+    while (node.type === "blockquote") node = node.body![0]!;
+    expect(node.type).toBe("table");
+    expect(node.children?.[1]?.children?.[0]?.value).toBe("Example");
+    expect(diagnostics).toEqual([]);
+  });
+});
+
+
+it("validates real merges inside quotes without accepting ragged merged rows", () => {
+  const valid = parse("> | A | B |\n> | --- | --- |\n> | > | Wide |");
+  expect(valid.body[0]?.body?.[0]).toMatchObject({ type: "table", children: [{}, { children: [{ colSpan: 2, value: "Wide" }] }] });
+  const invalid = parse("> | A | B |\n> | --- | --- |\n> | > | Wide | extra |");
+  expect(invalid.body[0]?.body?.[0]?.type).toBe("literal");
+});
