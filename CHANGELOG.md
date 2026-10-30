@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Keep enclosing block-quote markers out of pipe-table merge detection and column counts, so ordinary and merged tables inside quotes remain editable tables. Ragged merged rows still report a diagnostic and retain their source.
+
 ## 0.5.0
 
 - Read and write definition lists, as the Expressive Markdown specification
