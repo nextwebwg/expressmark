@@ -44,6 +44,22 @@ describe("where a definition starts", () => {
     if(source !== "- Term\n: Description") expect(read(source,"compatible").body).toEqual(body);
     else expect(read(source,"compatible").body).toEqual([{type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[lines("Term",": Description")]}]}]);
   });
+  it("never read a marker line as a term", () => {
+    for(const syntax of ["standard","compatible"] as const) {
+      expect(read(": x\n: d",syntax).body).toEqual([lines(": x",": d")]);
+      expect(read("P\n\n: x\n: d",syntax).body).toEqual([paragraph("P"),lines(": x",": d")]);
+    }
+  });
+  it("read `<br>` in a term as an element, so a term stays one line", () => {
+    for(const syntax of ["standard","compatible"] as const) {
+      const document = parse("T<br>\n: d\n",{syntax});
+      expect(semantic(document.body[0]!.children![0])).toEqual({type:"definitionTerm",children:[{type:"text",value:"T"},{type:"htmlElement",display:"inline",tag:"br",open:"<br />"}]});
+      document.body[0]!.children![1] = description(paragraph("edited"));
+      // The safe profile writes the tag as it filters it.
+      expect(stringify(document,{syntax})).toBe("T<br />\n: edited\n");
+      expect(semantic(parse(stringify(document,{syntax}),{syntax}).body)).toEqual(semantic(document.body));
+    }
+  });
   it("leave a setext underline to `compatible`, which reads the term and its marker line as a heading", () => {
     expect(read("Term\n: Description\n---").body).toEqual([list(term("Term"),description(paragraph("Description"))),{type:"horizontalRule"}]);
     expect(read("Term\n: Description\n---","compatible").body).toEqual([{type:"heading",level:2,children:lines("Term",": Description").children!}]);
@@ -128,6 +144,27 @@ describe("writing definition lists", () => {
     expect(semantic(parse(written))).toEqual(document);
     expect(stringify(parse("Term\n:   x\n    y\n\n\nNext\n  : z"),{preferredForms:true})).toBe("Term\n: x\n  y\n\nNext\n: z\n");
   });
+  it("record term and continuation indentation, and keep them when the block holding the list is rewritten", () => {
+    expect(parse("  T\n: d\n").body[0]!.source).toEqual({markdown:"  T\n: d"});
+    const quoted = parse("> T\n> : d\n>     more\n>\n> p\n");
+    quoted.body[0]!.body![1] = paragraph("edited");
+    expect(stringify(quoted)).toBe("> T\n> : d\n>     more\n> \n> edited\n");
+    // The lint rule flags exactly what preferredForms rewrites.
+    const codes: string[] = [];
+    parse("  T\n: d\n",{lint:true,onDiagnostic:diagnostic => codes.push(diagnostic.code)});
+    expect(codes).toEqual(["prefer-canonical-definition-list"]);
+    expect(stringify(parse("  T\n: d\n"),{preferredForms:true})).toBe("T\n: d\n");
+    expect(parse("- T\n  : d\n- a\n\n  U\n  : e\n").body[0]!.children!.map(item => item.body![0]!.source ?? item.body![1]?.source)).toEqual([undefined,undefined]);
+  });
+  it("write an unedited block after an edited list fresh when its source would continue that list", () => {
+    const after = parse("A\n\n: x\n");
+    after.body[0] = list(term("A"),description(paragraph("d")));
+    expect(stringify(after)).toBe("A\n: d\n\n\\: x\n");
+    expect(semantic(parse(stringify(after)).body)).toEqual(semantic(after.body));
+    const indented = parse("a\n\n  more\n");
+    indented.body[0] = {type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[paragraph("a")]}]};
+    expect(stringify(indented)).toBe("- a\n\nmore\n");
+  });
   it("keeps a recorded spelling while it reads as the list, and writes an edited list in the preferred form", () => {
     const document = parse("# Title\n\nTerm\n:   x\n");
     document.body[0] = {type:"heading",level:1,value:"Renamed"};
@@ -138,12 +175,12 @@ describe("writing definition lists", () => {
   it("protects a colon that would start a marker line, and a term that would start another block", () => {
     const document: Document = {type:"document",version:1,body:[
       lines("Term",": not a description"),
-      list(term("# Heading"),description(),term(": colon"),description(paragraph("x"))),
+      list(term(": first"),description(),term("# Heading"),description(),term(": colon"),description(paragraph("x"))),
       paragraph(": after the list"),
       lines("Later","line",": stays"),
     ]};
     const written = stringify(document);
-    expect(written).toBe("Term\n\\: not a description\n\n\\# Heading\n:\n\n\\: colon\n: x\n\n\\: after the list\n\nLater\nline\n: stays\n");
+    expect(written).toBe("Term\n\\: not a description\n\n\\: first\n:\n\n\\# Heading\n:\n\n\\: colon\n: x\n\n\\: after the list\n\nLater\nline\n: stays\n");
     expect(semantic(parse(written))).toEqual(document);
   });
   it.each<[string, Node[]]>([
@@ -153,6 +190,10 @@ describe("writing definition lists", () => {
     ["two terms above one description",[list(term("T"),term("U"),description())]],
     ["an ID on a list",[{...list(term("T"),description()),id:"glossary"}]],
     ["attributes on a term",[list({...term("T"),attributes:{class:"x"}},description())]],
+    ["a term with leading spaces",[list(term("  sp"),description())]],
+    ["a term with trailing spaces",[list(term("sp "),description())]],
+    ["an empty term",[list(term(""),description())]],
+    ["a term spanning lines",[list(term("a\nb"),description())]],
     ["a term holding a break",[list({type:"definitionTerm",children:[{type:"text",value:"a"},{type:"softBreak"},{type:"text",value:"b"}]},description())]],
     ["adjacent lists",[list(term("T"),description()),list(term("U"),description())]],
   ])("reports %s as an unsupported conversion", (_name, body) => {
@@ -167,16 +208,32 @@ describe("definition list diagnostics", () => {
     ["a later paragraph line holding only :","Term\nmore\n:"],
     ["a : paragraph after a one-line paragraph and a blank line","Term\n\n: Description"],
     ["a ~ paragraph after a one-line paragraph and a blank line","Term\n\n~ Description"],
+    ["a : paragraph after a two-line paragraph","One\nTwo\n\n: Three"],
+    ["a : line after a heading","## Term\n: Description"],
+    ["a ~ line after a description","T\n: d\n~ e"],
   ])("warn about %s", (_name, source) => {
     for(const syntax of ["standard","compatible"] as const) expect(read(source,syntax).codes).toEqual(["unattached-definition-marker"]);
+  });
+  it("warn once for each : or ~ line that reads as paragraph text, as quotes and list items end in standard", () => {
+    expect(read("- Term\n: Description").codes).toEqual(["unattached-definition-marker"]);
+    expect(read("> Term\n: Description").codes).toEqual(["unattached-definition-marker"]);
+    expect(read(": x\n: d").codes).toEqual(["unattached-definition-marker","unattached-definition-marker"]);
   });
   it.each([
     ["a definition list","Term\n: Description"],
     ["an escaped marker","Term\n\\: Description"],
-    ["a : paragraph after a two-line paragraph","One\nTwo\n\n: Three"],
     ["a colon without a following space","Term\n:Description"],
   ])("stay quiet for %s", (_name, source) => {
     expect(read(source).codes).toEqual([]);
+  });
+  it.each<[string, Node]>([
+    ["an empty list",list()],
+    ["a list starting with a description",list(description(),term("T"),description())],
+    ["a list ending with a term",list(term("T"),description(),term("U"))],
+  ])("report %s when rendering", (_name, node) => {
+    const seen: string[] = [];
+    renderHtml({type:"document",version:1,body:[node]},{onDiagnostic:diagnostic => seen.push(diagnostic.code)});
+    expect(seen).toEqual(["invalid-definition-list"]);
   });
   it("warn about mixed tabs and spaces in a description's indentation", () => {
     const seen: Diagnostic[] = [];

@@ -701,7 +701,7 @@ const list: BlockRule = (state, startLine, endLine, silent) => {
 //
 // A term is a paragraph's first line whose next line is a marker line: `:`
 // then a space, a tab or the line end, after any block-relative indentation.
-// The rule runs after every other block start, so a line that starts another
+// A marker line is never a term itself. The rule runs after every other block start, so a line that starts another
 // block is never a term, and a marker line never interrupts a paragraph, so
 // only a paragraph's first line is one. Each description reads a run of lines
 // as a relative list item does, without lazy continuation. A description's run
@@ -716,12 +716,8 @@ function markerEnd(state: StateBlock, line: number, endLine: number): number {
 const leadOf = (state: StateBlock, line: number) => state.src.slice(state.bMarks[line]!, state.bMarks[line]! + state.tShift[line]!);
 const lastContent = (state: StateBlock, from: number, end: number) => { while (end > from + 1 && state.isEmpty(end - 1)) end--; return end; };
 
-/**
- * Read the description whose marker on `line` ends at `after`. Returns the
- * description in the preferred form, `: ` and two-space continuation, or
- * undefined when its first line is empty but later lines are not.
- */
-function readDescription(state: StateBlock, line: number, endLine: number, after: number): string | undefined {
+/** Read the description whose marker on `line` ends at `after`. */
+function readDescription(state: StateBlock, line: number, endLine: number, after: number): void {
   const max = state.eMarks[line]!;
   let offset = state.sCount[line]! + 1, pos = after;
   for (; pos < max; pos++) {
@@ -752,19 +748,15 @@ function readDescription(state: StateBlock, line: number, endLine: number, after
   if (!tight || mixed) open.meta = { ...(tight ? {} : { loose: true }), ...(mixed ? { mixed: true } : {}) };
   state.push("dd_close", "dd", -1);
   map[1] = state.line;
-  const first = state.src.slice(pos, max), rest = state.getLines(line + 1, lastContent(state, line, state.line), offset, false);
-  if (!first) return rest ? undefined : ":";
-  return `: ${rest ? `${first}\n${rest}`.replace(/\n(?=[^\n])/g, "\n  ") : first}`;
 }
 
 /**
- * The authored source of a list's groups, and whether every group so far is
- * in the preferred form: a term, its descriptions on the following lines, and
- * one blank line before each later term.
+ * A list's authored lines, each its indentation column and its text after
+ * that indentation, or undefined for a blank line; `last` ends the lines read.
  */
-interface ListSource { column: number; chunks: string[]; preferred: boolean; last: number }
+export interface ListSource { lines: ([number, string] | undefined)[]; last: number }
 const definitionList: BlockRule = (state, startLine, endLine, silent) => {
-  if (silent || markerEnd(state, startLine + 1, endLine) < 0) return false;
+  if (silent || markerEnd(state, startLine, endLine) >= 0 || markerEnd(state, startLine + 1, endLine) < 0) return false;
   const last = state.tokens.at(-1);
   let map: [number, number], source: ListSource;
   if (last?.type === "dl_close" && last.level === state.level) {
@@ -772,7 +764,7 @@ const definitionList: BlockRule = (state, startLine, endLine, silent) => {
     map = last.map!; source = last.meta as unknown as ListSource;
   } else {
     map = [startLine, 0];
-    source = { column: state.sCount[startLine]!, chunks: [], preferred: true, last: startLine };
+    source = { lines: [], last: startLine };
     state.push("dl_open", "dl", 1).map = map;
   }
   state.push("dt_open", "dt", 1).map = [startLine, startLine + 1];
@@ -780,16 +772,10 @@ const definitionList: BlockRule = (state, startLine, endLine, silent) => {
   const term = asciiTrim(state.lineText(startLine));
   inline.content = term; inline.map = [startLine, startLine + 1]; inline.children = [];
   state.push("dt_close", "dt", -1);
-  let line = startLine + 1, preferred: string | undefined = term;
-  for (let after: number; (after = markerEnd(state, line, endLine)) >= 0; line = state.line) {
-    const written = readDescription(state, line, endLine, after);
-    preferred = preferred === undefined || written === undefined ? undefined : `${preferred}\n${written}`;
-  }
+  let line = startLine + 1;
+  for (let after: number; (after = markerEnd(state, line, endLine)) >= 0; line = state.line) readDescription(state, line, endLine, after);
   const end = lastContent(state, startLine, line);
-  const from = source.chunks.length ? source.last : startLine;
-  const chunk = state.getLines(from, end, source.column, false);
-  source.chunks.push(chunk);
-  source.preferred &&= preferred !== undefined && chunk === (source.chunks.length > 1 ? `\n${preferred}` : preferred);
+  for (let index = source.last; index < end; index++) source.lines.push(state.isEmpty(index) ? undefined : [state.sCount[index]!, state.lineText(index)]);
   source.last = end;
   const close = state.push("dl_close", "dl", -1);
   close.map = map; close.meta = source as unknown as Record<string, unknown>;

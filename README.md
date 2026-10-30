@@ -178,9 +178,11 @@ footnote definition re-reads the whole document, as does every edit with `lint`
 or `onDiagnostic`, whose findings span the document, and every edit of text
 holding a carriage return. In `standard` syntax, an edit touching an HTML tag
 re-reads the whole document, since an element reads through its end tag. A
-definition list continues past blank lines into a later term, so an edit
-re-reads from a definition list directly before the edited block, and reading
-continues through a definition list after it.
+definition list directly before the edited block is re-read too, since the
+block may become its next term. Re-reading stops where a block starts as before
+and no re-read list or definition list continues onto it. In `stringify`, an
+unedited block whose source would read as part of an edited block before it
+is written canonically.
 Treat a document as read-only while you edit it.
 
 ```ts

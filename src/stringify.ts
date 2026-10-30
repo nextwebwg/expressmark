@@ -1,6 +1,6 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
-import { alertMarker, contentHash, contentHashes, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
+import { alertMarker, contentHash, contentHashes, definitionGroups, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
 import { escapeHtml, rawTextElements, readStartTag, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
@@ -72,9 +72,7 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   }
   if(["list","table","tableRow","definitionList"].includes(node.type) && !Array.isArray(node.children)) fail(`${path} needs structural children.`);
   if(node.type === "definitionList") {
-    // Each group is a term, then one or more descriptions.
-    const kinds=node.children!.map(child=>child.type === "definitionTerm" ? "t" : child.type === "definitionDescription" ? "d" : "x").join("");
-    if(!/^(?:td+)+$/.test(kinds)) fail(`${path} needs groups of a definitionTerm and its definitionDescription nodes.`);
+    if(!definitionGroups(node)) fail(`${path} needs groups of a definitionTerm and its definitionDescription nodes.`);
   }
   if(["definitionList","definitionTerm","definitionDescription"].includes(node.type) && (node.id !== undefined || node.attributes)) fail(`${path} has no definition list attribute source mapping.`);
   if(node.type === "definitionTerm" && JSON.stringify(node.children ?? []).match(/"type":"(?:soft)?[bB]reak"/)) fail(`${path} needs one line: a term holds no break.`);
@@ -557,10 +555,9 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
           const text=blockArray(child.body ?? [],child.tight !== false);
           return text ? `: ${text.replace(/\n(?=[^\n])/g,"\n  ")}` : ":";
         }
-        // A later term starting with a marker would add a description to the term before it.
-        let term=content(child);
-        if(index) term=term.replace(/^:(?=[ \t]|$)/,"\\:");
-        if(!term.trim() || term.includes("\n")) fail("A definition term needs one line of text.");
+        // A term starting with a marker would read as a description.
+        const term=content(child).replace(/^:(?=[ \t]|$)/,"\\:");
+        if(!term.trim() || /^[ \t]|[ \t]$|\n/.test(term)) fail("A definition term cannot be written: a term is one line, read trimmed.");
         return `${index ? "\n":""}${term}`;
       }).join("\n");
     }
@@ -687,6 +684,8 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const newline=/\r\n/.test(text) ? "\r\n":"\n";
     const lines=(value: string)=>newline === "\n" ? value : value.replace(/\n/g,newline);
     let output="", end: number | undefined, used=-1, separator=true;
+    // The last block written fresh, which an unedited block after it may continue.
+    let fresh: {nodes: Node[]; value: string} | undefined;
     const recordedHead=recorded.head as [string,number] | undefined;
     if(recordedHead && recordedHead[0] === contentHash([document.id,document.title,document.metadata,document.syntax]) && (metadata.markdownSyntax === undefined || text.slice(0,recordedHead[1]).includes("markdownSyntax"))) { output=text.slice(0,recordedHead[1]); end=recordedHead[1]; }
     else if(!recordedHead && !generatedHead) end=0;
@@ -702,8 +701,14 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       if(found >= 0) {
         const [count,,from,to,html]=blocks[found]!;
         const gap=end !== undefined && found === used+1 && replay(text.slice(end,from)) ? text.slice(end,from) : undefined;
-        // An unedited block the profile filters is written fresh, keeping the source's spacing.
-        const value=replay(text.slice(from,to),html) ? text.slice(from,to) : lines(blockArray(nodes.slice(index,index+count)));
+        const group=nodes.slice(index,index+count);
+        // An unedited block the profile filters is written fresh, keeping the
+        // source's spacing. So is one that, after a block written fresh, would
+        // read as part of it, as indented lines continue a list.
+        const after=fresh;
+        const continues=after !== undefined && !reads(`${after.value}\n\n${text.slice(from,to)}`,{type:"group",children:[...after.nodes,...group]},parsed=>({type:"group",children:parsed.body}));
+        const value=replay(text.slice(from,to),html) && !continues ? text.slice(from,to) : lines(continues ? group.map((node,offset)=>block(node,false,nodes[index+offset-1])).filter(Boolean).join("\n\n") : blockArray(group));
+        fresh=undefined;
         output+=gap ?? (output && separator && value ? lines("\n\n"):"");
         separator=true;
         output+=value;
@@ -719,12 +724,13 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         output+=gap ?? (output && separator ? lines("\n\n"):"");
         separator=true;
         output+=items;
+        fresh={nodes:[node],value:items};
         end=next![3]; used++; index++;
         continue;
       }
       const neighboringTabs=node.type === "container" && node.subType === "tabs" && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
       const value=block(node,neighboringTabs,nodes[index-1]);
-      if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; }
+      if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; fresh={nodes:[node],value}; }
       index++;
     }
     if(end !== undefined && used === blocks.length-1 && replay(text.slice(end))) return output+text.slice(end);
