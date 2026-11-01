@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3
+
+- `renderHtml` reports `unsupported-presentation` for a code fence with `src`
+  and for an `example` leaf: it reads no files, so it renders the fence's own
+  content and the example's label. A renderer that reads files handles both
+  with its own transformers.
+
 ## 0.5.2
 
 - A marker line is never a term: `: x` followed by `: d` is one paragraph.

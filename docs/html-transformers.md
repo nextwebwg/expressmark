@@ -148,6 +148,12 @@ Unsupported align/float values remain authored data and emit
 attribute behavior. Native `div[data-type="layout"]` wrappers import as editable
 layout containers, with `data-align`/`data-float` restored to their attributes.
 
+A code fence with `src` and an `example` leaf name files, which `renderHtml`
+does not read. Default rendering emits `unsupported-presentation` for each, and
+renders a fence's own content and an example's label. A renderer that reads
+files supplies `code` and `leaf:example` transformers for them (see
+[code from a file](https://nextwebwg.org/expressive-markdown/language#code-from-a-file)).
+
 Run `corepack pnpm exec playwright install chromium firefox webkit` once, then
 `corepack pnpm test:browser`. The single-worker suite measures rendered block and
 text geometry after parsing, rendering and sanitizing in Chromium, Firefox and

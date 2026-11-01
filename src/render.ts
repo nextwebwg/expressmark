@@ -243,12 +243,16 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
         return `${open}${inner}${close}`;
       }
       case "code": {
+        // Code from a file needs a renderer that reads files; this one renders the fence's own content.
+        if (typeof node.attributes?.src === "string" && node.attributes.src) warn(diagnostics, "unsupported-presentation", `Code from a file (src="${node.attributes.src}") needs a renderer that reads files; rendering the fence's own content.`);
         const code = element(node, "pre", `<code${node.language ? ` class="language-${escapeHtml(node.language)}"` : ""}>${text(node.value ?? "")}</code>`);
         return node.title ? `<figure>${code}<figcaption>${title(node)}</figcaption></figure>` : code;
       }
       case "group": return element(node, node.display === "inline" ? "span" : "div", content(node));
       case "lineBlock": return element(node, "div", content(node), { "data-type": "line-block", style: "white-space:pre-line" });
-      case "inline": case "leaf": return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { ...(node.subType !== undefined ? { "data-type": node.subType } : {}), ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
+      case "inline": case "leaf":
+        if (node.type === "leaf" && node.subType === "example") warn(diagnostics, "unsupported-presentation", `A live example${typeof node.attributes?.src === "string" ? ` (src="${node.attributes.src}")` : ""} needs a renderer that reads files.`);
+        return element(node, node.type === "leaf" && node.subType === "toc" ? "nav" : "span", `${title(node)}${content(node)}`, { ...(node.subType !== undefined ? { "data-type": node.subType } : {}), ...(node.ref !== undefined ? { "data-ref": node.ref } : {}) });
       case "container": {
         if (node.subType === "layout") return layout(node);
         const heading = title(node);
