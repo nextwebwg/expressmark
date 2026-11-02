@@ -4,6 +4,8 @@
 
 - Spaces or tabs may pad an attribute list inside its braces: `{ .note }`
   reads as `{.note}` in every position, and the writer keeps the padding.
+- A list attaches to a link or image only when it touches it: in
+  `[a](b) {.x}` the list is text.
 - A link or image whose quoted title is exactly one attribute list carries
   those attributes: `[a](b "{embed}")` reads as `[a](b){embed}`, and other
   Markdown renderers show an ordinary link. A partial or malformed list, or a

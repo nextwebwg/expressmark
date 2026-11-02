@@ -21,6 +21,12 @@ it("reads a title that is one attribute list as the link's or image's attributes
   expect(link('[a](b "{ embed highlight=2 }")\n')).toMatchObject({ attributes: { embed: true, highlight: "2" } });
   expect(link('[a](b "{ }")\n')).not.toHaveProperty("title");
   expect(parse("## Deploy { #deploy }\n").body[0]).toMatchObject({ type: "heading", id: "deploy" });
+  // An attached list touches its link or image; a space leaves it text.
+  for (const markdown of ["[a](b) {.x}", "![a](b) {.x}", "Text [a](b)\t{.x} more"]) {
+    const children = parse(markdown + "\n").body[0]?.children ?? [];
+    expect(children[children.length - 2] ?? children[0]).not.toHaveProperty("attributes");
+    expect(stringify(parse(markdown + "\n"))).toBe(markdown + "\n");
+  }
   // Reference definitions keep their titles.
   expect(link('[a][r]\n\n[r]: b "{x}"\n')).toMatchObject({ type: "linkReference" });
   expect(parse('[a][r]\n\n[r]: b "{x}"\n').body[1]).toMatchObject({ type: "definition", title: "{x}" });

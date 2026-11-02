@@ -271,7 +271,8 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
   hooks.expressive_attachment=(state,silent) => {
     if(state.src[state.pos] !== "{") return false;
     const last=state.tokens.at(-1);
-    if(!last || !["image","link_close"].includes(last.type)) return false;
+    // Pending text, such as a space, separates the list from the link.
+    if(!last || state.pending || !["image","link_close"].includes(last.type)) return false;
     const attrs=readAttributes(state.src.slice(state.pos),options); if(!attrs) return false;
     if(silent) { state.pos+=attrs.length; return true; }
     const existing=(last.meta ?? {}) as {attributes?: ReturnType<typeof readAttributes>[]};
