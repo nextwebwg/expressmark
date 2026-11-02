@@ -15,8 +15,12 @@ it("reads a title that is one attribute list as the link's or image's attributes
   const { source: _, ...titled } = link('[a](b "{.x #y}")\n')!;
   expect(titled).toEqual(link("[a](b){.x #y}\n"));
   // A partial, malformed or escaped list stays a title.
-  for (const [markdown, title] of [['[a](b "{beta} build")', "{beta} build"], ['[a](b "{oops")', "{oops"], ['[a](b "\\{beta}")', "{beta}"], ['[a](b "{ x }")', "{ x }"]])
+  for (const [markdown, title] of [['[a](b "{beta} build")', "{beta} build"], ['[a](b "{oops")', "{oops"], ['[a](b "\\{beta}")', "{beta}"], ['[a](b "{x &}")', "{x &}"]])
     expect(link(markdown + "\n")).toMatchObject({ type: "link", title });
+  // Padding inside the braces reads the same list.
+  expect(link('[a](b "{ embed highlight=2 }")\n')).toMatchObject({ attributes: { embed: true, highlight: "2" } });
+  expect(link('[a](b "{ }")\n')).not.toHaveProperty("title");
+  expect(parse("## Deploy { #deploy }\n").body[0]).toMatchObject({ type: "heading", id: "deploy" });
   // Reference definitions keep their titles.
   expect(link('[a][r]\n\n[r]: b "{x}"\n')).toMatchObject({ type: "linkReference" });
   expect(parse('[a][r]\n\n[r]: b "{x}"\n').body[1]).toMatchObject({ type: "definition", title: "{x}" });

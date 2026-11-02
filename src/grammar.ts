@@ -27,8 +27,9 @@ export function sourceKey(key: string): string { return key.replace(/[A-Z]/g, c 
 /** `replacesClass`: an assigned `class=` set the list's class, rather than shorthands adding to it. */
 export interface AttributeResult { length: number; id?: string; attributes: Attributes; replacesClass?: boolean }
 export function readAttributes(source: string, options: ConversionOptions = {}): AttributeResult | undefined {
-  if (source[0] !== "{" || /[ \t]/.test(source[1] ?? "")) return;
-  let cursor = 1;
+  if (source[0] !== "{") return;
+  // Spaces or tabs may pad the list inside its braces.
+  let cursor = 1 + /^[ \t]*/.exec(source.slice(1))![0].length;
   const result: AttributeResult = { length: 0, attributes: {} };
   const seen = new Set<string>();
   while (cursor < source.length && source[cursor] !== "}") {
@@ -50,7 +51,7 @@ export function readAttributes(source: string, options: ConversionOptions = {}):
       const separator = /^[ \t&]+/.exec(source.slice(cursor));
       if (!separator) return;
       cursor += separator[0].length;
-      if (source[cursor] === "}") return;
+      if (source[cursor] === "}") { if (separator[0].includes("&")) return; break; }
       continue;
     }
     else if (equal >= 0) {
@@ -70,9 +71,9 @@ export function readAttributes(source: string, options: ConversionOptions = {}):
     const separator = /^[ \t&]+/.exec(source.slice(cursor));
     if (!separator) return;
     cursor += separator[0].length;
-    if (source[cursor] === "}") return;
+    if (source[cursor] === "}") { if (separator[0].includes("&")) return; break; }
   }
-  if (source[cursor] !== "}" || /[ \t]/.test(source[cursor - 1] ?? "")) return;
+  if (source[cursor] !== "}") return;
   result.length = cursor + 1;
   return result;
 }

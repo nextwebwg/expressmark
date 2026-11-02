@@ -45,6 +45,7 @@ const spellings: [string, string][] = [
   ["compact container header","::::warning[Careful]{#c}\nBody.\n::::\n"],
   ["uppercase container type","::: WARNING [Careful]\nBody.\n:::\n"],
   ["longer container fence","::::: note\nBody.\n:::::\n"],
+  ["padded attribute lists","## Deploy { #deploy open }\n\n[a](b){ .x }\n\n[c](d \"{ embed }\")\n\n```ts { title=deploy.ts }\ncode\n```\n"],
   ["image attributes","![Diagram](d.svg){width=640 & responsive}\n"],
   ["chip attributes","A :chip[Ready]{tone='green'} chip.\n"],
   ["line block indentation","|   Morgan Lee\n| 42 Example\n  Street\n"],
