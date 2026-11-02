@@ -1,11 +1,15 @@
 # Changelog
 
-## 0.5.3
+## 0.6.0
 
-- `renderHtml` reports `unsupported-presentation` for a code fence with `src`
-  and for an `example` leaf: it reads no files, so it renders the fence's own
-  content and the example's label. A renderer that reads files handles both
-  with its own transformers.
+- A link or image whose quoted title is exactly one attribute list carries
+  those attributes: `[a](b "{embed}")` reads as `[a](b){embed}`, and other
+  Markdown renderers show an ordinary link. A partial or malformed list, or a
+  title that escapes its brace as `"\{…}"`, stays a title. The writer keeps
+  the authored spelling and escapes a literal title that would read as a list.
+- `renderHtml` reports `unsupported-presentation` for a link with an `embed`
+  setting alone in its paragraph: it reads no files, so it renders the link. A
+  renderer that reads files embeds with a `paragraph` transformer.
 
 ## 0.5.2
 

@@ -157,6 +157,10 @@ export function readHeader(source: string, options: ConversionOptions = {}, unbr
   }
   return node;
 }
+/** A link title holding an attribute list, in the quote character the list does not use. */
+export function quoteTitle(list: string): string {
+  return !list.includes('"') ? `"${list}"` : !list.includes("'") ? `'${list}'` : quoteAttribute(list);
+}
 export function quoteAttribute(value: string): string {
   if(/[\r\n]/.test(value) || value.includes(String.fromCharCode(0))) throw new ConversionError("unsupported-conversion","An attribute value cannot contain a newline or NUL.");
   return `"${value.replace(/\\/g,"\\\\").replace(/"/g,'\\"')}"`;

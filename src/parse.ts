@@ -1,7 +1,7 @@
 import { Engine, type StateBlock, type StateInline, type Token } from "./markdown/engine.js";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { alertMarker, attach, childHashes, compact, contentHash, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { alertMarker, attach, quoteTitle, childHashes, compact, contentHash, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installStandard, standardRules, type StandardRule } from "./standard.js";
@@ -543,8 +543,18 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     state.line=cursor; return true;
   };
 
+  // A title that is exactly one attribute list, unless its source escapes the
+  // opening brace, attaches the list instead of becoming a tooltip.
+  function titled(node: Node, tooltip: string | null, reference: unknown, target: unknown): void {
+    if(tooltip === null || reference) return;
+    // A title follows whitespace, so `"\{` there is an escaped title brace.
+    const escaped=typeof target === "string" && /\s["'(]\\\{/.test(target);
+    const probe=tooltip.startsWith("{") && !escaped ? readAttributes(tooltip) : undefined;
+    if(probe && probe.length === tooltip.length) { attach(node,readAttributes(tooltip,options)!); spell(node,"attachment","title"); spellAttributes(node,tooltip); }
+    else node.title=tooltip;
+  }
   function spellTarget(node: Node, target: unknown): void {
-    if(typeof target === "string" && target !== `(${destination(node.url ?? "")}${typeof node.title === "string" ? ` ${quoteAttribute(node.title)}`:""})`) spell(node,"target",target);
+    if(typeof target === "string" && target !== `(${destination(node.url ?? "")}${typeof node.title === "string" ? ` ${quoteAttribute(node.title)}`:node.source?.attachment === "title" ? ` ${quoteTitle(typeof node.source.attributes === "string" ? node.source.attributes:writeAttributes(node))}`:""})`) spell(node,"target",target);
   }
   function spellAttributes(node: Node, authored: unknown): void {
     if(typeof authored === "string" && authored !== writeAttributes(node)) spell(node,"attributes",authored);
@@ -622,14 +632,14 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
           const reference=token.meta?.reference as Pick<Node,"label"|"referenceType"> | undefined;
           // A reference keeps its label; the definition supplies the target when rendering.
           const node: Node=reference ? {type:"imageReference",...reference,alt} : {type:"image",url:String(token.attrGet("src") ?? ""),alt};
-          const tooltip=token.attrGet("title"); if(tooltip !== null && !reference) node.title=String(tooltip);
+          { const tooltip=token.attrGet("title"); titled(node,tooltip === null ? null:String(tooltip),reference,token.meta?.target); }
           for(const attrs of ((token.meta?.attributes ?? []) as NonNullable<ReturnType<typeof readAttributes>>[])) attach(node,attrs);
           spellTarget(node,token.meta?.target); spellAttributes(node,token.meta?.attributesSource);
           nodes.push(node);
         } else if(token.type === "link_open") {
           const reference=token.meta?.reference as Pick<Node,"label"|"referenceType"> | undefined;
           const node=compact(reference ? {type:"linkReference",...reference} : {type:"link",url:String(token.attrGet("href") ?? "")},read("link_close"));
-          const tooltip=token.attrGet("title"); if(tooltip !== null && !reference) node.title=String(tooltip);
+          { const tooltip=token.attrGet("title"); titled(node,tooltip === null ? null:String(tooltip),reference,token.meta?.target); }
           for(const attrs of ((tokens[cursor-1]?.meta?.attributes ?? []) as NonNullable<ReturnType<typeof readAttributes>>[])) attach(node,attrs);
           if(token.markup === "autolink" || token.markup === "linkify") spell(node,"form",token.markup === "autolink" ? "angle":"bare");
           spellTarget(node,token.meta?.target); spellAttributes(node,tokens[cursor-1]?.meta?.attributesSource);
