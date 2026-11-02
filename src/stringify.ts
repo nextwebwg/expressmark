@@ -1,6 +1,6 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
-import { alertMarker, contentHash, contentHashes, definitionGroups, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
+import { alertMarker, contentHash, contentHashes, definitionGroups, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, quoteTitle, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
 import { escapeHtml, rawTextElements, readStartTag, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
@@ -297,13 +297,19 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         // A bare URL is written as text the reader links again by itself.
         if(form === "bare" && syntax.linkify.match(text)?.[0]?.raw === text && reads(text,{type:"paragraph",children:[node]},undefined,"form",node)) return text;
       }
-      const tooltip=typeof node.title === "string" ? ` ${quoteAttribute(node.title)}` : "";
+      // An authored title list carries the attributes; a literal title that
+      // would read as one escapes its brace.
+      const listed=spelling(node,"attachment") === "title" && node.title === undefined && attrs !== "";
+      const quoted=typeof node.title === "string" ? quoteAttribute(node.title) : "";
+      const titleList=typeof node.title === "string" && node.title.startsWith("{") && readAttributes(node.title)?.length === node.title.length;
+      const tooltip=listed ? ` ${quoteTitle(attrs)}` : quoted ? ` ${titleList ? `${quoted[0]}\\${quoted.slice(1)}`:quoted}` : "";
       const label=node.type === "image" ? escapeText(node.alt ?? "",{block:false,label:true}) : content(node,{label:true,protectAutolinks:false,mentionStart:false});
       const authored=spelling(node,"target");
-      const target=authored && reads(`[x]${authored}`,{type:node.type,url:node.url ?? "",...(node.title !== undefined ? {title:node.title}:{})},document=>{
-        const found=document.body[0]?.children?.[0]; return found ? {type:node.type,url:found.url,...(found.title !== undefined ? {title:found.title}:{})} as Node : undefined;
-      },"target",node) ? authored : `(${destination(node.url ?? "")}${tooltip})`;
-      return `${node.type === "image" ? "!":""}[${label}]${target}${attrs}`;
+      const pick=(found: Node): Node => ({type:node.type,url:found.url,...(found.title !== undefined ? {title:found.title}:{}),...(listed && found.id !== undefined ? {id:found.id}:{}),...(listed && found.attributes ? {attributes:found.attributes}:{})} as Node);
+      const target=authored && reads(`[x]${authored}`,pick(node),document=>{
+        const found=document.body[0]?.children?.[0]; return found ? pick(found) : undefined;
+      },listed ? undefined:"target",node) ? authored : `(${destination(node.url ?? "")}${tooltip})`;
+      return `${node.type === "image" ? "!":""}[${label}]${target}${listed ? "":attrs}`;
     }
     if(node.type === "linkReference" || node.type === "imageReference") {
       const text=node.type === "imageReference" ? escapeText(node.alt ?? "",{block:false,label:true}) : content(node,{label:true,protectAutolinks:false,mentionStart:false});

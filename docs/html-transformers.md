@@ -148,6 +148,13 @@ Unsupported align/float values remain authored data and emit
 attribute behavior. Native `div[data-type="layout"]` wrappers import as editable
 layout containers, with `data-align`/`data-float` restored to their attributes.
 
+A link with an `embed` setting, alone in its paragraph, embeds the file it
+links to, as in `[button.html](examples/button.html "{embed}")`. `renderHtml`
+reads no files: it renders the link and emits `unsupported-presentation`. A
+renderer that reads files supplies a `paragraph` transformer that renders the
+embed and returns `undefined` for other paragraphs (see
+[embedded files](https://nextwebwg.org/expressive-markdown/language#embedded-files)).
+
 Run `corepack pnpm exec playwright install chromium firefox webkit` once, then
 `corepack pnpm test:browser`. The single-worker suite measures rendered block and
 text geometry after parsing, rendering and sanitizing in Chromium, Firefox and

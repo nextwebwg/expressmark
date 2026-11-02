@@ -199,7 +199,12 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       case "text": return node.id !== undefined || Object.keys(node.attributes ?? {}).length ? element(node, "span", content(node)) : content(node);
       // A closing tag never creates an element: a stray one, kept for writing, renders nothing.
       case "html": return standardDocument && /^<\/[A-Za-z][A-Za-z0-9-]*[^>]*>$/.test(node.value ?? "") ? "" : authored(node.value ?? "");
-      case "paragraph": return element(node, "p", content(node));
+      case "paragraph": {
+        // Embedding a linked file needs a renderer that reads files; this one renders the link.
+        const only = node.children?.length === 1 ? node.children[0] : undefined;
+        if (only?.type === "link" && only.attributes?.embed !== undefined) warn(diagnostics, "unsupported-presentation", `Embedding ${only.url} needs a renderer that reads files; rendering a link.`);
+        return element(node, "p", content(node));
+      }
       case "heading":
         if (!Number.isInteger(node.level) || node.level! < 1 || node.level! > 6) throw new ConversionError("unsupported-html-node", "HTML headings need a level from 1 to 6.");
         return element(node, `h${node.level}`, content(node), anchors && node.id === undefined ? { id: anchors.get(node)! } : {});
