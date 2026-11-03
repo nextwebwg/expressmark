@@ -15,7 +15,7 @@ concurrency:
 jobs:
   verify:
     name: Verify Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","minipc-isolated"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     # The Playwright image carries the browsers and their system libraries, so
     # no step downloads apt packages. Keep its tag equal to the playwright pin.
@@ -47,7 +47,7 @@ jobs:
     name: Required
     if: always()
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","minipc-isolated"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 1
     steps:
       - run: test "${{ needs.verify.result }}" = success
