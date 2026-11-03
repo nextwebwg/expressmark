@@ -1,0 +1,54 @@
+name: MINIPC isolated runner verification
+on:
+  push:
+    branches: [ci/minipc-runner-smoke]
+permissions:
+  contents: read
+jobs:
+  first-job:
+    timeout-minutes: 8
+    runs-on:
+      group: MINIPC Disposable VMs
+      labels: [self-hosted, Linux, X64, minipc-isolated]
+    steps:
+      - name: Verify unprivileged Linux guest and write reset marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -un)" = ci
+          test "$(uname -s)" = Linux
+          if sudo -n true 2>/dev/null; then echo 'Unexpected sudo access'; exit 1; fi
+          test ! -e /tmp/minipc-job-marker
+          echo first-job > /tmp/minipc-job-marker
+          echo "First machine ID: $(cat /etc/machine-id)"
+      - name: Check network isolation
+        shell: python3 {0}
+        run: |
+          import socket, urllib.request
+          assert urllib.request.urlopen('https://api.github.com', timeout=15).status == 200
+          for host in ['192.168.248.1', '192.168.68.60', '192.168.248.22', '100.67.116.3', '169.254.169.254']:
+              sock = socket.socket()
+              sock.settimeout(2)
+              try:
+                  sock.connect((host, 443))
+              except OSError:
+                  print('Blocked:', host)
+              else:
+                  raise AssertionError('Private address reachable: ' + host)
+              finally:
+                  sock.close()
+  second-job:
+    needs: first-job
+    timeout-minutes: 8
+    runs-on:
+      group: MINIPC Disposable VMs
+      labels: [self-hosted, Linux, X64, minipc-isolated]
+    steps:
+      - name: Verify previous job's disk was discarded
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -un)" = ci
+          test ! -e /tmp/minipc-job-marker
+          echo "Second machine ID: $(cat /etc/machine-id)"
+          echo 'Clean VM disk verified across two real GitHub Actions jobs.'
