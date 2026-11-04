@@ -258,9 +258,9 @@ reads block quotes and list items as Parseman line runs. YAML handles metadata,
 and sanitize-html with htmlparser2 handles the safe native profile. Oxlint and Vitest check conversions,
 unsafe input, malformed data, round trips and a fresh packed-package consumer.
 
-The manual **Release** workflow publishes reviewed `main` through the protected
-`npm` environment using trusted publishing with provenance. The requested version
-must match `package.json`. Foundation owns policy files listed in
+The **Release** workflow publishes `package.json`'s version once CI passes on
+`main`, through the protected `npm` environment using trusted publishing with
+provenance. A merge that keeps a published version publishes nothing. Foundation owns policy files listed in
 `threadlabs.config.json`.
 
 MIT licensed. See [LICENSE](LICENSE).

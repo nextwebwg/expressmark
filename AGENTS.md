@@ -18,8 +18,8 @@
   meaningful parser/round-trip/consumer contracts rather than tests that restate code.
 - Follow `docs/code-documentation-standard.md`: explain invariants and non-obvious
   decisions beside their implementation; avoid blanket JSDoc or comment quotas.
-- Publication uses the owner-approved `npm` environment and the manual release
-  workflow on `main`. Never publish from a dirty source tree or a feature branch.
+- Merging a new `package.json` version publishes it: the release workflow runs
+  after CI passes on `main`, through the `npm` environment. Never publish from a dirty source tree or a feature branch.
 - Keep private consumer context and motivating project names out of public examples,
   templates, fixtures and documentation.
 
