@@ -1,12 +1,13 @@
 name: Release
 
+# Each push to main whose CI passes publishes package.json's version when npm
+# lacks it. A manual run publishes main's version the same way.
 on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
-    inputs:
-      version:
-        description: Exact version committed on main
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -18,7 +19,9 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The Playwright image carries the browsers and their system libraries, so
@@ -31,6 +34,9 @@ jobs:
     environment: npm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Publish exactly the main commit whose CI passed.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       # The container's root git reads a checkout owned by the runner's user.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -38,10 +44,25 @@ jobs:
           node-version: '24'
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: npm install --global --ignore-scripts --force corepack@0.34.7
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify:release
-      - run: node scripts/release.mjs
+      - id: version
+        name: Check whether npm already has this version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "expressmark@$version" version >/dev/null 2>&1; then
+            echo "expressmark@$version is already published"
+          else
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.pending == 'true'
+        run: npm install --global --ignore-scripts --force corepack@0.34.7
+      - if: steps.version.outputs.pending == 'true'
+        run: corepack enable
+      - if: steps.version.outputs.pending == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.version.outputs.pending == 'true'
+        run: pnpm verify:release
+      - if: steps.version.outputs.pending == 'true'
+        run: node scripts/release.mjs
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
