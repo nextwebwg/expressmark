@@ -668,6 +668,13 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
               if(new RegExp(`^<\\/${open[1]}[ \\t]*>`,"i").test(raw) && --nesting === 0) break;
             }
             if(end<tokens.length) {
+              const native=tokens.slice(cursor,end);
+              // A picture's source/img children choose an image, rather than contribute label text.
+              // Sending them through the opaque wrapper's text slot would discard the fallback.
+              if(open[1]!.toLowerCase() === "picture" && native.every(token => ["html_inline","text","softbreak"].includes(token.type))) {
+                const value=token.content+native.map(token => token.type === "softbreak" ? "\n":token.content).join("")+tokens[end]!.content;
+                nodes.push(...htmlNodes(value,"inline",options)); cursor=end+1; continue;
+              }
               const marker="EXPRESSIVE_INLINE_CONTENT";
               const wrappers=htmlNodes(`${token.content}${marker}${tokens[end]!.content}`,"inline",options);
               // Sanitize the HTML shell first. Its safe content slot is populated with

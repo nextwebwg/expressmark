@@ -18,6 +18,11 @@ GitHub's tag filter shows it, and reports `html-element-escaped`:
 disallowed script's content shows as text too. Disallowed tags in transformer
 output are removed. Comments are not retained.
 
+An inline `picture` keeps its native `source` and fallback `img` elements
+through parsing, writing and rendering, including source media conditions and
+image alternatives. Its contents pass through the same safe profile as other
+HTML.
+
 | Scope | Accepted attributes |
 | --- | --- |
 | Every accepted tag | `id class style title lang dir data-* aria-*` |
