@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Keep native inline `<picture>` content intact, including responsive sources
+  and its fallback image. The safe HTML profile continues filtering unsafe URLs
+  and event handlers.
+
 ## 0.6.0
 
 - Spaces or tabs may pad an attribute list inside its braces: `{ .note }`

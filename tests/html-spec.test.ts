@@ -54,3 +54,22 @@ describe("an element's tags in separate HTML blocks", () => {
     expect(renderHtml(parse(sources[1]!))).toBe("<details>\n<summary>Release notes</summary><p>This paragraph is <strong>Markdown</strong>.</p></details>");
   });
 });
+
+describe("native picture content", () => {
+  it("retains responsive sources and the fallback image in inline HTML", () => {
+    const source = '<picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo"></picture>';
+    const document = parse(source);
+    const html = renderHtml(document);
+    expect(html).toContain('<source media="(prefers-color-scheme: dark)" srcset="dark.svg"');
+    expect(html).toContain('<img src="light.svg" alt="Logo"');
+    expect(html).not.toContain("&lt;source");
+    expect(renderHtml(parse(stringify(document)))).toBe(html);
+  });
+
+  it("still filters unsafe URLs and event handlers in picture content", () => {
+    const html = renderHtml(parse('<picture><source srcset="javascript:alert(1)"><img src="safe.png" onerror="alert(1)" alt="Safe"></picture>'));
+    expect(html).toContain('src="safe.png"');
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("onerror");
+  });
+});

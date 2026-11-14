@@ -23,6 +23,17 @@ for (const engine of [chromium, firefox, webkit]) describe(engine.name(), () => 
   afterEach(async () => { await page.close(); });
   afterAll(async () => { await browser.close(); });
 
+  it("lets native picture sources select the image for the current color scheme", async () => {
+    await page.route("https://layout.test/**", route => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"></svg>' }));
+    const html = renderHtml(parse('<picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo"></picture>', { syntax: "compatible" }));
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.setContent('<base href="https://layout.test/">' + html);
+    const image = page.getByRole("img", { name: "Logo" });
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).currentSrc)).toBe("https://layout.test/dark.svg");
+    await page.emulateMedia({ colorScheme: "light" });
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).currentSrc)).toBe("https://layout.test/light.svg");
+  });
+
   async function show(source: string, dir: string, lang: string, width = 560): Promise<void> {
     const html = renderHtml(parse(source));
     await page.setContent(`<!doctype html><html lang="${lang}" dir="${dir}"><head><base href="https://layout.test/"><style>
