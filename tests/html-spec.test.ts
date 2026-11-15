@@ -56,6 +56,25 @@ describe("an element's tags in separate HTML blocks", () => {
   });
 });
 
+describe("native heading alignment", () => {
+  it.each(["left", "center", "right", "justify"])("keeps %s alignment and responsive picture choices", align => {
+    const source = `<h1 align="${align}"><picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo" width="280"></picture></h1>`;
+    const document = parse(source);
+    const html = renderHtml(document);
+    expect(html).toContain(`<h1 align="${align}">`);
+    expect(html).toContain('srcset="dark.svg"');
+    expect(html).toContain('src="light.svg"');
+    expect(renderHtml(parse(stringify(document)))).toBe(html);
+    expect(sanitizeHtml(html, {})).toBe(html);
+  });
+
+  it("filters invalid alignment, handlers and unsafe image URLs independently", () => {
+    const html = renderHtml(parse('<h2 align="center; color:red" onclick="alert(1)"><img src="javascript:alert(1)" alt="Safe"></h2>'));
+    expect(html).not.toMatch(/align=|onclick|javascript:/);
+    expect(html).toContain('alt="Safe"');
+  });
+});
+
 describe("native picture content", () => {
   it("retains responsive sources and the fallback image in inline HTML", () => {
     const source = '<picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo"></picture>';

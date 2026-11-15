@@ -27,6 +27,7 @@ HTML.
 | --- | --- |
 | Every accepted tag | `id class style title lang dir data-* aria-*` |
 | Link | `href name target rel` |
+| Heading (`h1` through `h6`) | `align` with `left`, `center`, `right` or `justify` |
 | Image | `src alt width height loading` |
 | Image source | `srcset media type width height` |
 | Disclosure | `open` |

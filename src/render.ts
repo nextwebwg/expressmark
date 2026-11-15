@@ -121,7 +121,8 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       let name = sourceKey(key);
       // Names cannot be escaped. The shared sanitizer owns value and URL policy.
       if (!/^[a-zA-Z][\w:-]*$/.test(name) || value === false) return "";
-      if (!nativeAttributes.has(name) && !name.startsWith("data-") && !name.startsWith("aria-")) name = `data-${name}`;
+      // Heading align is native presentation; layout align remains preserved data.
+      if (!nativeAttributes.has(name) && !(node.type === "heading" && name === "align") && !name.startsWith("data-") && !name.startsWith("aria-")) name = `data-${name}`;
       return value === true ? ` ${name}` : ` ${name}="${escapeHtml(String(value))}"`;
     }).join("");
   }

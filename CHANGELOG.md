@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+- Preserve native heading alignment through safe HTML parsing and rendering,
+  including headings containing responsive pictures. Invalid alignment values
+  and active content remain filtered.
+
 ## 0.6.3
 
 - Preserve literal leading and trailing whitespace, tabs and line endings in
