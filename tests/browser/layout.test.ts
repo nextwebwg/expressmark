@@ -25,13 +25,20 @@ for (const engine of [chromium, firefox, webkit]) describe(engine.name(), () => 
 
   it("lets native picture sources select the image for the current color scheme", async () => {
     await page.route("https://layout.test/**", route => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"></svg>' }));
-    const html = renderHtml(parse('<picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo"></picture>', { syntax: "compatible" }));
+    const html = renderHtml(parse('<h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo"></picture></h1>', { syntax: "compatible" }));
     await page.emulateMedia({ colorScheme: "dark" });
     await page.setContent('<base href="https://layout.test/">' + html);
     const image = page.getByRole("img", { name: "Logo" });
+    const centered = async () => {
+      await image.evaluate(element => (element as HTMLImageElement).decode());
+      const heading = (await page.locator("h1").boundingBox())!, logo = (await image.boundingBox())!;
+      expect(Math.abs(logo.x + logo.width / 2 - heading.x - heading.width / 2)).toBeLessThan(1);
+    };
     await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).currentSrc)).toBe("https://layout.test/dark.svg");
+    await centered();
     await page.emulateMedia({ colorScheme: "light" });
     await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).currentSrc)).toBe("https://layout.test/light.svg");
+    await centered();
   });
 
   async function show(source: string, dir: string, lang: string, width = 560): Promise<void> {

@@ -18,6 +18,8 @@ const policy: sanitize.IOptions = {
     a: ["href", "name", "target", "rel"],
     img: ["src", "alt", "width", "height", "loading"], source: ["srcset", "media", "type", "width", "height"],
     details: ["open"], ol: ["start"], li: ["value"],
+    // Headings use HTML's finite presentation values, including logo-only headings.
+    ...Object.fromEntries(["h1", "h2", "h3", "h4", "h5", "h6"].map(tag => [tag, [{ name: "align", values: ["left", "center", "right", "justify"] }]])),
     td: ["colspan", "rowspan", "headers"], th: ["colspan", "rowspan", "scope", "headers"],
   },
   allowedStyles: {"*": {color:[color], "background-color":[color], "text-align":[/^(?:left|right|center|justify|start|end)$/], "vertical-align":[/^(?:top|middle|bottom|baseline)$/], width:[size], height:[size], "max-width":[size], "font-weight":[/^(?:normal|bold|[1-9]00)$/], "font-style":[/^(?:normal|italic)$/], "text-decoration":[/^(?:none|underline|line-through)$/], "white-space":[/^(?:normal|pre|pre-wrap|pre-line|break-spaces)$/],
@@ -72,7 +74,7 @@ const allowlistPolicies = new WeakMap<HtmlAllowlist, sanitize.IOptions>();
 function allowlistPolicy(allowlist: HtmlAllowlist): sanitize.IOptions {
   const cached = allowlistPolicies.get(allowlist);
   if (cached) return cached;
-  const attributes: Record<string, string[]> = { ...(policy.allowedAttributes as Record<string, string[]>) };
+  const attributes = { ...policy.allowedAttributes };
   for (const [tag, names] of Object.entries(allowlist.attributes ?? {})) {
     for (const name of names) {
       // A wildcard could admit event handlers, so only a named prefix may end in *.
