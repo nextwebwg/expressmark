@@ -199,10 +199,14 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(typeof node.title === "object" && node.title !== null && (node.title.id !== undefined || node.title.attributes || ["container","leaf"].includes(node.type) && /[\r\n]|^[ \t]|[ \t]$/.test(content(node.title)))) fail("A title's own attributes have no bracket-title source mapping.");
     const context: TextContext={block:false,label:node.type !== "document"};
     return typeof node.title === "object" && node.title !== null ? content(node.title,context) : typeof node.title === "string" ? escapeText(node.title,context) : ""; }
-  function native(node: Node): string {
+  function native(node: Node, markdownText = false): string {
+    // Inline HTML still passes through Markdown parsing. Escape authored text
+    // there; block HTML keeps literal HTML text and needs no Markdown escapes.
+    const text = (value: string) => escapeHtml(markdownText ? escapeText(value,{block:false,htmlText:true,footnotes,references}) : value);
+    const descendant = (child: Node) => native(child,markdownText);
     const wrapper=(tag:string,value:string,extra:Record<string,string|boolean|number> = {}) => `<${tag}${attrsHtml(node,extra)}>${value}</${tag}>`;
-    const kids=()=>node.value !== undefined ? escapeHtml(node.value) : (node.children ?? []).map(native).join("");
-    if(node.type === "text") return escapeHtml(node.value ?? "");
+    const kids=()=>node.value !== undefined ? text(node.value) : (node.children ?? []).map(descendant).join("");
+    if(node.type === "text") return text(node.value ?? "");
     if(node.type === "paragraph") return wrapper("p",kids());
     if(node.type === "heading") return wrapper(`h${node.level}`,kids());
     if(node.type === "title") return kids();
@@ -214,16 +218,16 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "link") return wrapper("a",kids(),{href:node.url ?? "",...(typeof node.title === "string" ? {title:node.title}:{})});
     if(node.type === "inline") return wrapper("span",kids(),{...(node.subType !== undefined ? {"data-type":node.subType}:{}),...(node.ref !== undefined ? {"data-ref":node.ref}:{})});
     if(node.type === "container" && !["details","figure"].includes(node.subType ?? "")) {
-      const heading=node.title ? `<header>${typeof node.title === "object" ? native(node.title):escapeHtml(node.title)}</header>`:"";
-      return node.subType === undefined ? wrapper("div",`${heading}${(node.body ?? []).map(native).join("")}`) : wrapper("section",`${heading}${(node.body ?? []).map(native).join("")}`,{"data-type":node.subType});
+      const heading=node.title ? `<header>${typeof node.title === "object" ? descendant(node.title):text(node.title)}</header>`:"";
+      return node.subType === undefined ? wrapper("div",`${heading}${(node.body ?? []).map(descendant).join("")}`) : wrapper("section",`${heading}${(node.body ?? []).map(descendant).join("")}`,{"data-type":node.subType});
     }
-    if(node.type === "group") return wrapper(node.tag ?? (node.display === "inline" ? "span":"div"),(node.children ?? []).map(native).join(""));
-    if(node.type === "blockquote") return wrapper("blockquote",(node.body ?? []).map(native).join(""));
-    if(node.type === "list") return wrapper(node.ordered ? "ol":"ul",(node.children ?? []).map(native).join(""),node.start !== undefined ? {start:node.start}:{});
-    if(node.type === "htmlElement") return `${elementTag(node.open!)}${node.value !== undefined ? rawTextElements.has(node.tag!) ? node.value : escapeHtml(node.value) : [...(node.body ?? []),...(node.children ?? [])].map(native).join("")}${voidElements.has(node.tag!) ? "" : node.close ?? `</${node.tag}>`}`;
+    if(node.type === "group") return wrapper(node.tag ?? (node.display === "inline" ? "span":"div"),(node.children ?? []).map(descendant).join(""));
+    if(node.type === "blockquote") return wrapper("blockquote",(node.body ?? []).map(descendant).join(""));
+    if(node.type === "list") return wrapper(node.ordered ? "ol":"ul",(node.children ?? []).map(descendant).join(""),node.start !== undefined ? {start:node.start}:{});
+    if(node.type === "htmlElement") return `${elementTag(node.open!)}${node.value !== undefined ? rawTextElements.has(node.tag!) ? node.value : text(node.value) : [...(node.body ?? []),...(node.children ?? [])].map(descendant).join("")}${voidElements.has(node.tag!) ? "" : node.close ?? `</${node.tag}>`}`;
     if(node.type === "listItem") {
       if(node.checked !== undefined) fail("A styled task-list item has no lossless safe HTML mapping.");
-      return wrapper("li",(node.body ?? []).map(native).join(""));
+      return wrapper("li",(node.body ?? []).map(descendant).join(""));
     }
     if(node.type === "code") {
       if(node.title !== undefined || node.meta !== undefined) fail("Styled native code with a caption or uninterpreted metadata is unsupported.");
@@ -231,17 +235,17 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     }
     if(node.type === "container" && ["details","figure"].includes(node.subType ?? "")) {
       const tag=node.subType!;
-      const heading=node.title ? `<${tag === "details" ? "summary":"figcaption"}>${typeof node.title === "object" ? native(node.title):escapeHtml(node.title)}</${tag === "details" ? "summary":"figcaption"}>` : "";
-      return wrapper(tag,`${tag === "details" ? heading:""}${(node.body ?? []).map(native).join("")}${tag === "figure" ? heading:""}`);
+      const heading=node.title ? `<${tag === "details" ? "summary":"figcaption"}>${typeof node.title === "object" ? descendant(node.title):text(node.title)}</${tag === "details" ? "summary":"figcaption"}>` : "";
+      return wrapper(tag,`${tag === "details" ? heading:""}${(node.body ?? []).map(descendant).join("")}${tag === "figure" ? heading:""}`);
     }
-    if(node.type === "table") return wrapper("table",`${node.title ? `<caption>${typeof node.title === "object" ? native(node.title):escapeHtml(node.title)}</caption>`:""}${(node.children ?? []).map(native).join("")}`,node.align ? {"data-align":JSON.stringify(node.align)}:{});
-    if(node.type === "tableRow") return wrapper("tr",(node.children ?? []).map(native).join(""));
-    if(node.type === "tableCell") return wrapper(node.header ? "th":"td",node.body ? node.body.map(native).join("") : kids(),{...(node.colSpan ? {colspan:node.colSpan}:{}),...(node.rowSpan ? {rowspan:node.rowSpan}:{})});
+    if(node.type === "table") return wrapper("table",`${node.title ? `<caption>${typeof node.title === "object" ? descendant(node.title):text(node.title)}</caption>`:""}${(node.children ?? []).map(descendant).join("")}`,node.align ? {"data-align":JSON.stringify(node.align)}:{});
+    if(node.type === "tableRow") return wrapper("tr",(node.children ?? []).map(descendant).join(""));
+    if(node.type === "tableCell") return wrapper(node.header ? "th":"td",node.body ? node.body.map(descendant).join("") : kids(),{...(node.colSpan ? {colspan:node.colSpan}:{}),...(node.rowSpan ? {rowspan:node.rowSpan}:{})});
     if(node.type === "html") { if(node.id !== undefined || node.attributes) fail("Opaque HTML node attributes have no independent source mapping."); return options.trustedHtml ? node.value ?? "" : sanitizeFragment(node.value ?? "",options); }
     fail(`Node ${node.type} cannot be represented in a native HTML wrapper.`);
   }
-  function safeNative(node: Node): string {
-    const raw=native(node);
+  function safeNative(node: Node, markdownText = false): string {
+    const raw=native(node,markdownText);
     const clean=sanitizeHtml(raw,options);
     if(clean !== raw) warn(options,"presentation-filtered","Native presentation was normalized or filtered by the safe HTML profile.");
     return clean;
@@ -252,26 +256,27 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       warn(options,"unsafe-url","An unsafe link or image URL was removed.");
       return node.type === "image" ? escapeText(node.alt ?? "") : content(node);
     }
-    if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})}); return escapeText(node.value ?? "",{...context,...(previous ? {previous}:{}),...(next ? {next}:{})}); }
+    if(node.type === "text") { if(attrs) return safeNative({type:"group",display:"inline",tag:"span",children:[{type:"text",value:node.value ?? ""}],...(node.id !== undefined ? {id:node.id}:{}),...(node.attributes ? {attributes:node.attributes}:{})},true); return escapeText(node.value ?? "",{...context,...(previous ? {previous}:{}),...(next ? {next}:{})}); }
     if(["strong","emphasis","delete"].includes(node.type)) {
       const marks=["strong","emphasis","delete"];
       // Delimiter runs can lose padded text or merge adjacent/nested marks.
       // Keep their exact boundaries with the existing semantic HTML mapping.
       if(attrs || node.children?.some(child=>marks.includes(child.type))
-        || marks.includes(previous?.type ?? "") || marks.includes(next?.type ?? "")) return safeNative(node);
+        || marks.includes(previous?.type ?? "") || marks.includes(next?.type ?? "")) return safeNative(node,true);
       // Underscores do not delimit inside a word, so they need word boundaries.
       const underscore=node.type !== "delete" && spelling(node,"marker") === "_"
         && !(previous?.type === "text" && /[\p{L}\p{N}_]$/u.test(previous.value ?? "")) && !(next?.type === "text" && /^[\p{L}\p{N}_]/u.test(next.value ?? ""));
       const value=content(node,{...context,mentionStart:false,marks:`${context.marks ?? ""}${node.type === "delete" ? "~":underscore ? "_":"*"}`});
       if(!value || /^\s|\s$/u.test(value)
         || /^[\p{P}\p{S}]/u.test(value) && previous?.type === "text" && /[^\s\p{P}\p{S}]$/u.test(previous.value ?? "")
-        || /[\p{P}\p{S}]$/u.test(value) && next?.type === "text" && /^[^\s\p{P}\p{S}]/u.test(next.value ?? "")) return safeNative(node);
+        || /[\p{P}\p{S}]$/u.test(value) && next?.type === "text" && /^[^\s\p{P}\p{S}]/u.test(next.value ?? "")) return safeNative(node,true);
       const mark=node.type === "strong" ? underscore ? "__":"**" : node.type === "emphasis" ? underscore ? "_":"*":"~~";
       return `${mark}${value}${mark}`;
     }
-    if(["underline","highlight","group"].includes(node.type)) return safeNative(node);
+    if(["underline","highlight","group"].includes(node.type)) return safeNative(node,true);
     if(node.type === "inlineCode") {
-      if(attrs) return safeNative(node);
+      // Adjacent fences join into a different run and consume their boundaries.
+      if(attrs || previous?.type === "inlineCode" || next?.type === "inlineCode") return safeNative(node,true);
       const ticks=spelling(node,"fence");
       const value=node.value ?? "";
       // A recorded run works while the code holds no run of the same length.
@@ -282,13 +287,13 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return inlineCode(value);
     }
     if(node.type === "break") {
-      if(attrs) return safeNative(node);
+      if(attrs) return safeNative(node,true);
       const spaces=node.source?.spaces;
       return typeof spaces === "number" && spaces >= 2 && next ? `${" ".repeat(spaces)}\n` : "\\\n";
     }
     if(node.type === "softBreak") { if(attrs) fail("A soft break cannot carry authored attributes in Markdown."); return "\n"; }
     // A multiline tooltip, as HTML allows, has no Markdown title spelling.
-    if((node.type === "link" || node.type === "image") && typeof node.title === "string" && /[\r\n]/.test(node.title)) return safeNative(node);
+    if((node.type === "link" || node.type === "image") && typeof node.title === "string" && /[\r\n]/.test(node.title)) return safeNative(node,true);
     if(node.type === "link" || node.type === "image") {
       const form=spelling(node,"form");
       if(node.type === "link" && form && !attrs && node.title === undefined && node.value !== undefined) {
@@ -332,7 +337,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         // Markdown cannot spell a mention at a non-whitespace source boundary.
         // Native semantic markup preserves an authored occurrence there without
         // inserting spaces into the document or broadening mention recognition.
-        if(!startsMention({...context,...(previous ? {previous}:{})})) return safeNative(node);
+        if(!startsMention({...context,...(previous ? {previous}:{})})) return safeNative(node,true);
         const ref=node.ref;
         const suffix=ref !== undefined && tokenHandle(ref) === ref ? `#${ref}`:"";
         const following=next?.type === "text" ? next.value ?? "" : "";

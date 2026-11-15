@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { renderHtml } from "../src/render.js";
 import { sanitizeHtml, type HtmlAllowlist } from "../src/html.js";
+import type { Document } from "../src/types.js";
 
 // CommonMark's and GFM's HTML-block and raw-HTML examples. Raw HTML is read
 // in the trusted profile, which keeps it, so block boundaries are visible.
@@ -71,5 +72,33 @@ describe("native picture content", () => {
     expect(html).toContain('src="safe.png"');
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("onerror");
+  });
+});
+
+describe("literal text in native inline wrappers", () => {
+  it.each(["data-*", "**literal**", "https://example.test/a_b?x=[1]&y=2", "&lt;script&gt; \\<code>"])("keeps code punctuation literal through HTML mark boundaries: %s", value => {
+    const document: Document = {type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
+      {type:"strong",value:"Before "},{type:"strong",children:[{type:"inlineCode",value}]},{type:"strong",value:" after *the note*."},
+      {type:"text",value:" Then "},{type:"inlineCode",value:"token"},
+      {type:"text",value:" literal data-* "},{type:"inlineCode",value:"fallback"},
+      {type:"text",value:" then "},{type:"emphasis",value:"the note"},
+    ]}]};
+    const written = stringify(document), read = parse(written);
+    expect(renderHtml(read)).toBe(renderHtml(document));
+    expect(() => stringify(read)).not.toThrow();
+  });
+
+  it("keeps punctuation literal inside a native block without introducing visible escapes", () => {
+    const document: Document = {type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",attributes:{class:"note"},children:[
+      {type:"strong",value:"**literal**"},{type:"inlineCode",value:"data-*"},
+    ]}]};
+    expect(renderHtml(parse(stringify(document)))).toBe(renderHtml(document));
+  });
+
+  it("keeps adjacent code spans from merging their fence runs", () => {
+    const document: Document = {type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
+      {type:"inlineCode",value:"first"},{type:"inlineCode",value:" second "},{type:"inlineCode",value:"third"},
+    ]}]};
+    expect(renderHtml(parse(stringify(document)))).toBe(renderHtml(document));
   });
 });
