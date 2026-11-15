@@ -190,14 +190,17 @@ describe("writing definition lists", () => {
     ["two terms above one description",[list(term("T"),term("U"),description())]],
     ["an ID on a list",[{...list(term("T"),description()),id:"glossary"}]],
     ["attributes on a term",[list({...term("T"),attributes:{class:"x"}},description())]],
-    ["a term with leading spaces",[list(term("  sp"),description())]],
-    ["a term with trailing spaces",[list(term("sp "),description())]],
     ["an empty term",[list(term(""),description())]],
-    ["a term spanning lines",[list(term("a\nb"),description())]],
     ["a term holding a break",[list({type:"definitionTerm",children:[{type:"text",value:"a"},{type:"softBreak"},{type:"text",value:"b"}]},description())]],
     ["adjacent lists",[list(term("T"),description()),list(term("U"),description())]],
   ])("reports %s as an unsupported conversion", (_name, body) => {
     expect(() => stringify({type:"document",version:1,body})).toThrow(ConversionError);
+  });
+  it("retains whitespace in terms through character references on one source line",()=> {
+    for(const value of ["  sp", "sp ", "a\nb"]) {
+      const document: Document={type:"document",version:1,syntax:"compatible",body:[list(term(value),description())]};
+      expect(semantic(parse(stringify(document)))).toEqual(document);
+    }
   });
 });
 
