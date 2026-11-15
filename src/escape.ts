@@ -3,6 +3,8 @@ import { mentionBoundary, normalizeLabel, readAttributes, readLabel, tokenHandle
 import type { Node } from "./types.js";
 
 export interface TextContext {
+  /** An enclosing HTML writer owns angle-bracket and entity escaping. */
+  htmlText?: boolean;
   block?: boolean;
   label?: boolean;
   heading?: boolean;
@@ -83,9 +85,9 @@ function opensInlineSyntax(state: StateInline, offset: number): boolean {
 
 export function escapeText(value: string, context: TextContext = {}): string {
   const escapes=new Set<number>();
-  const marks=(context.marks ?? "")+[context.previous,context.next].map(node=>node?.type === "delete" ? "~":["strong","emphasis"].includes(node?.type ?? "") ? "*":"").join("");
+  const marks=(context.htmlText ? "*_~":context.marks ?? "")+[context.previous,context.next].map(node=>node?.type === "delete" ? "~":["strong","emphasis"].includes(node?.type ?? "") ? "*":"").join("");
   if(/[*_~]/.test(value)) delimiters.inline.parse(value,delimiters,{escapes,marks},[]);
-  const mixed=Boolean(context.previous || context.next);
+  const mixed=Boolean(context.htmlText || context.previous || context.next);
   const ticks=Array.from(value.matchAll(/`+/g));
   const counts=new Map<number,number>();
   for(const tick of ticks) counts.set(tick[0].length,(counts.get(tick[0].length) ?? 0)+1);
@@ -97,7 +99,7 @@ export function escapeText(value: string, context: TextContext = {}): string {
   for(let i=0;i<value.length;i++) {
     const char=value[i]!;
     if(char === "\\" && (/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~\n]/.test(value[i+1] ?? "") || i === value.length-1 && (context.next || context.label || context.marks))) escapes.add(i);
-    if(char === "[" || char === "<") {
+    if(char === "[" || char === "<" && !context.htmlText) {
       if(opensInlineSyntax(inlineState,i)) {
         escapes.add(i);
         // Escaping an inner link must not expose an outer bracket as a new
@@ -176,7 +178,7 @@ export function escapeText(value: string, context: TextContext = {}): string {
   // Encode only references the reader actually decodes. Invalid entity-like
   // words and ordinary ampersands stay readable.
   return Array.from(value.matchAll(/&(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);|[\s\S]/g),match=> {
-    if(match[0].length>1 && syntax.utils.unescapeAll(match[0]) !== match[0]) return `&amp;${match[0].slice(1)}`;
+    if(!context.htmlText && match[0].length>1 && syntax.utils.unescapeAll(match[0]) !== match[0]) return `&amp;${match[0].slice(1)}`;
     return `${escapes.has(match.index) ? "\\":""}${match[0]}`;
   }).join("");
 }

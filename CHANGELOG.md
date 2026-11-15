@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- Preserve literal Markdown punctuation inside generated inline HTML,
+  including formatted code, adjacent code spans and neighboring marks.
+
 ## 0.6.1
 
 - Keep native inline `<picture>` content intact, including responsive sources
