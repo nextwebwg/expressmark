@@ -193,7 +193,15 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       } else children.push(child);
     }
     const textContext: TextContext={...context,footnotes,references,block:["paragraph","tableCell","definitionTerm"].includes(node.type),heading:node.type === "heading"};
-    return node.value !== undefined ? escapeText(node.value,textContext) : children.map((child,index)=>inline(child,children[index-1],children[index+1],textContext)).join("");
+    if(node.value !== undefined) return escapeText(node.value,textContext);
+    let output="";
+    for(const [index,child] of children.entries()) {
+      // An entity preserves semantic whitespace without providing a raw
+      // Markdown mention boundary. Use the actual written boundary.
+      const mentionStart=context.mentionStart !== false && (!output || /\s$/u.test(output));
+      output+=inline(child,children[index-1],children[index+1],{...textContext,mentionStart});
+    }
+    return output;
   }
   function caption(node: Node): string {
     if(typeof node.title === "object" && node.title !== null && (node.title.id !== undefined || node.title.attributes || ["container","leaf"].includes(node.type) && /[\r\n]|^[ \t]|[ \t]$/.test(content(node.title)))) fail("A title's own attributes have no bracket-title source mapping.");
@@ -337,7 +345,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         // Markdown cannot spell a mention at a non-whitespace source boundary.
         // Native semantic markup preserves an authored occurrence there without
         // inserting spaces into the document or broadening mention recognition.
-        if(!startsMention({...context,...(previous ? {previous}:{})})) return safeNative(node,true);
+        if(context.mentionStart === false || !startsMention({...context,...(previous ? {previous}:{})})) return safeNative(node,true);
         const ref=node.ref;
         const suffix=ref !== undefined && tokenHandle(ref) === ref ? `#${ref}`:"";
         const following=next?.type === "text" ? next.value ?? "" : "";
@@ -424,7 +432,18 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const align=grid[0]!.map((_cell,index)=>({start:":---",center:":---:",end:"---:"} as Record<string,string>)[node.align?.[index] ?? ""] ?? "---");
     return [rows[0]!,align,...rows.slice(1)].map(row=>`| ${row.join(" | ")} |`).join("\n");
   }
-  function list(node: Node): string {
+  function separatingListMarker(node: Node, previous?: Node, previousValue?: string): string | undefined {
+    if(previous?.type !== "list" || previous.ordered !== node.ordered) return;
+    const preceding=/^(?:\d+([.)])|([-+*]))[ \t]/u.exec(previousValue ?? "");
+    if(!preceding) return;
+    const own=document.syntax !== "compatible" && node.children?.[0] ? spelling(node.children[0],"bullet"):undefined;
+    const authored=own ?? spelling(node,"marker");
+    const current=node.ordered ? authored === ")" ? ")":"." : authored === "*" || authored === "+" ? authored:"-";
+    // Matching markers would merge separate neighbouring lists on the next read.
+    if((preceding[1] ?? preceding[2]) !== current) return;
+    return node.ordered ? current === "." ? ")":"." : current === "-" ? "+":"-";
+  }
+  function list(node: Node, separate?: string): string {
     if(typeof node.ordered !== "boolean" || !Array.isArray(node.children) || node.children.some(item=>item.type !== "listItem")) fail("Lists need ordered and listItem children.");
     if(node.id !== undefined || node.attributes) return safeNative(node);
     const start=node.start ?? 1;
@@ -437,7 +456,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       if(item.id !== undefined || item.attributes) fail("List-item attributes need a native list wrapper.");
       // An item's own bullet or delimiter, which `standard` syntax keeps in the list.
       const own=document.syntax !== "compatible" ? spelling(item,"bullet"):undefined;
-      const prefix=node.ordered ? `${same ? start:start+index}${own === ")" || own === "." ? own:delimiter} `:`${own && "-*+".includes(own) ? own:bullet} `;
+      const prefix=node.ordered ? `${same ? start:start+index}${separate ?? (own === ")" || own === "." ? own:delimiter)} `:`${separate ?? (own && "-*+".includes(own) ? own:bullet)} `;
       const task=item.checked === undefined ? "" : `[${item.checked ? spelling(item,"marker") === "X" ? "X":"x":" "}] `;
       // Task markers are structural only at the start of a list item. A plain
       // paragraph or a heading can contain the same bracketed text unescaped.
@@ -509,7 +528,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     return `${colons} ${heading}\n\n${body}${body ? "\n\n":""}${colons}`;
   }
   const elementTag=(open: string) => options.trustedHtml || open.startsWith("</") ? open : sanitizeStartTag(open,options);
-  function block(node: Node, forceTabsWrapper = false, previous?: Node): string {
+  function block(node: Node, forceTabsWrapper = false, previous?: Node, previousValue?: string): string {
     if(node.type === "paragraph") {
       // A `:` line after the first line would make that line a term, and one
       // starting the paragraph would add a description to a list before it.
@@ -557,7 +576,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       const text=blockArray(node.body ?? []).replace(alertMarker,marker=>structuralTypes.has(alertMarker.exec(marker)![1]!.toLowerCase()) ? marker:`\\${marker}`);
       return text.split("\n").map(value=>`> ${value}`).join("\n");
     }
-    if(node.type === "list") return list(node);
+    if(node.type === "list") return list(node,separatingListMarker(node,previous,previousValue));
     if(node.type === "definitionList") {
       const authored=spelling(node,"markdown");
       if(authored && reads(authored,node,undefined,"markdown")) return authored;
@@ -647,17 +666,22 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     if(node.type === "literal") { if(node.id !== undefined || node.attributes) fail("Recovery literal attributes have no source mapping."); return sanitizeLiteral(node.value ?? "",options); }
     fail(`Unsupported block node: ${node.type}.`);
   }
-  function blockArray(nodes: Node[], tightList = false): string {
-    const blocks=nodes.map((node,index)=> {
+  function blockArray(nodes: Node[], tightList = false, preceding?: Node, precedingValue?: string): string {
+    const blocks: {node: Node; value: string}[]=[];
+    for(const [index,node] of nodes.entries()) {
       const neighboringTabs=node.type === "container" && node.subType === "tabs"
         && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
-      return {node,value:block(node,neighboringTabs,nodes[index-1])};
-    }).filter(({value})=>Boolean(value));
+      const previous=blocks.at(-1);
+      const value=block(node,neighboringTabs,previous?.node ?? preceding,previous?.value ?? precedingValue);
+      if(value) blocks.push({node,value});
+    }
     // A blank line between an item's blocks would loosen its list.
     return blocks.map(({node,value},index)=> {
       // A tight item's blocks touch: a block that interrupts a paragraph follows it directly.
       const interrupts=["list","blockquote","container","table"].includes(node.type) || node.type === "code" && node.source?.form !== "indented" || node.type === "heading" && node.source?.form !== "setext";
-      const adjacent=tightList && interrupts && blocks[index-1]?.node.type === "paragraph";
+      const previous=blocks[index-1];
+      // Native paragraph HTML consumes following lines until a blank separator.
+      const adjacent=tightList && interrupts && previous?.node.type === "paragraph" && !/^<p(?:\s|>)/u.test(previous.value);
       return `${index === 0 ? "" : adjacent ? "\n":"\n\n"}${value}`;
     }).join("");
   }
@@ -694,7 +718,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     const replay=(slice: string, html = 1)=>trusted || !html || !slice.trim();
     const newline=/\r\n/.test(text) ? "\r\n":"\n";
     const lines=(value: string)=>newline === "\n" ? value : value.replace(/\n/g,newline);
-    let output="", end: number | undefined, used=-1, separator=true;
+    let output="", end: number | undefined, used=-1, separator=true, previousValue: string | undefined;
     // The last block written fresh, which an unedited block after it may continue.
     let fresh: {nodes: Node[]; value: string} | undefined;
     const recordedHead=recorded.head as [string,number] | undefined;
@@ -718,11 +742,12 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         // read as part of it, as indented lines continue a list.
         const after=fresh;
         const continues=after !== undefined && !reads(`${after.value}\n\n${text.slice(from,to)}`,{type:"group",children:[...after.nodes,...group]},parsed=>({type:"group",children:parsed.body}));
-        const value=replay(text.slice(from,to),html) && !continues ? text.slice(from,to) : lines(continues ? group.map((node,offset)=>block(node,false,nodes[index+offset-1])).filter(Boolean).join("\n\n") : blockArray(group));
+        const value=replay(text.slice(from,to),html) && !continues ? text.slice(from,to) : lines(blockArray(group,false,nodes[index-1],previousValue));
         fresh=undefined;
         output+=gap ?? (output && separator && value ? lines("\n\n"):"");
         separator=true;
         output+=value;
+        previousValue=count === 1 ? value:undefined;
         end=to; used=found; index+=count;
         continue;
       }
@@ -734,14 +759,17 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
         const gap=end !== undefined && replay(text.slice(end,next![2])) ? text.slice(end,next![2]) : undefined;
         output+=gap ?? (output && separator ? lines("\n\n"):"");
         separator=true;
-        output+=items;
-        fresh={nodes:[node],value:items};
+        const separate=separatingListMarker(node,nodes[index-1],previousValue);
+        const value=separate ? lines(list(node,separate)):items;
+        output+=value;
+        previousValue=value;
+        fresh={nodes:[node],value};
         end=next![3]; used++; index++;
         continue;
       }
       const neighboringTabs=node.type === "container" && node.subType === "tabs" && [nodes[index-1],nodes[index+1]].some(neighbor=>neighbor?.type === "container" && neighbor.subType === "tabs");
-      const value=block(node,neighboringTabs,nodes[index-1]);
-      if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; fresh={nodes:[node],value}; }
+      const value=block(node,neighboringTabs,nodes[index-1],previousValue);
+      if(value) { output+=(output && separator ? lines("\n\n"):"")+lines(value); end=undefined; separator=true; fresh={nodes:[node],value}; previousValue=value; }
       index++;
     }
     if(end !== undefined && used === blocks.length-1 && replay(text.slice(end))) return output+text.slice(end);

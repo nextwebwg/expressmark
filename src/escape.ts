@@ -177,7 +177,12 @@ export function escapeText(value: string, context: TextContext = {}): string {
   }
   // Encode only references the reader actually decodes. Invalid entity-like
   // words and ordinary ampersands stay readable.
+  // Literal whitespace must survive block trimming and line tokenization.
+  // Explicit break nodes still write source line breaks; HTML owns its escaping.
+  const leading=!context.previous || ["break","softBreak"].includes(context.previous.type) ? /^\s*/u.exec(value)![0].length:0;
+  const trailing=!context.next || ["break","softBreak"].includes(context.next.type) ? value.trimEnd().length:value.length;
   return Array.from(value.matchAll(/&(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);|[\s\S]/g),match=> {
+    if(!context.htmlText && (/^[\r\n\t]$/.test(match[0]) || /^\s$/u.test(match[0]) && (match.index<leading || match.index>=trailing))) return `&#${match[0].codePointAt(0)};`;
     if(!context.htmlText && match[0].length>1 && syntax.utils.unescapeAll(match[0]) !== match[0]) return `&amp;${match[0].slice(1)}`;
     return `${escapes.has(match.index) ? "\\":""}${match[0]}`;
   }).join("");

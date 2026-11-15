@@ -1,6 +1,6 @@
 import { parseCompatible as parse, stringifyCompatible as stringify } from "./compatible.js";
 import { expect, it } from "vitest";
-import { type Document } from "../src/index.js";
+import { parse as parseDocument, stringify as stringifyDocument, type Document } from "../src/index.js";
 import { semantic } from "./semantic.js";
 
 it.each([
@@ -237,6 +237,70 @@ it("preserves empty and whitespace-only paragraphs between authored blocks",()=>
   expect(parse(stringify(document as never))).toEqual(document);
 });
 
+it("preserves literal whitespace at text boundaries and inside headings",()=> {
+  for(const value of [" Leading", "Trailing ", " Leading and trailing ", "\tIndented\t", "Before\nAfter", "Before\rAfter"]) {
+    for(const block of [{type:"paragraph",value},{type:"heading",level:2,value},{type:"paragraph",children:[{type:"strong",value}]}]) {
+      const document={type:"document",version:1,syntax:"compatible",body:[block]} as Document;
+      expect(semantic(parse(stringify(document))),`${block.type}: ${JSON.stringify(value)}`).toEqual(document);
+    }
+  }
+});
+
+it("retains literal newline text between inline code without joining the code spans",()=> {
+  const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
+    {type:"inlineCode",value:"first"},{type:"text",value:"\n"},{type:"inlineCode",value:"second"},
+  ]}]};
+  expect(semantic(parse(stringify(document)))).toEqual(document);
+});
+
+it("keeps mentions after whitespace represented by character references",()=> {
+  for(const value of [" ", "\n", "Before\n"]) {
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"paragraph",children:[
+      {type:"text",value},{type:"inline",subType:"mention",value:"Ada",ref:"user-123"},
+    ]}]};
+    expect(semantic(parse(stringify(document)))).toEqual(document);
+  }
+});
+
+it("retains boundary whitespace in table cells",()=> {
+  for(const value of [" Leading", "Trailing ", " Leading and trailing "]) {
+    const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"table",children:[
+      {type:"tableRow",children:[{type:"tableCell",header:true,value:"Field"}]},
+      {type:"tableRow",children:[{type:"tableCell",value}]},
+    ]}]};
+    expect(semantic(parse(stringify(document)))).toEqual(document);
+  }
+});
+
+it("keeps consecutive list blocks separate when their authored markers are absent",()=> {
+  for(const syntax of ["compatible", "standard"] as const) for(const source of [
+    "- First\n\n+ Second\n\n- Third\n",
+    "1. First\n\n1) Second\n\n1. Third\n",
+  ]) {
+    const document=semantic(parseDocument(source,{syntax}));
+    expect(semantic(parseDocument(stringifyDocument(document,{syntax}),{syntax}))).toEqual(document);
+  }
+});
+
+it("keeps inserted lists distinct from retained source on either side",()=> {
+  for(const syntax of ["compatible", "standard"] as const) for(const source of [
+    "- First\n\n+ Third\n", "1. First\n\n1) Third\n",
+  ]) for(const index of [0,1,2]) {
+    const document=parseDocument(source,{syntax});
+    const added=semantic(parseDocument(source.startsWith("-") ? "- Inserted":"1. Inserted",{syntax})).body[0]!;
+    document.body.splice(index,0,added);
+    expect(semantic(parseDocument(stringifyDocument(document,{syntax}),{syntax}))).toEqual(semantic(document));
+  }
+});
+
+it("separates a nested quote from an empty paragraph's native HTML",()=> {
+  const document: Document={type:"document",version:1,syntax:"compatible",body:[{type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[
+    {type:"paragraph",value:""},{type:"blockquote",body:[{type:"heading",level:2,value:"Review"}]},
+    {type:"list",ordered:false,tight:true,children:[{type:"listItem",body:[{type:"paragraph",value:"Nested"}]}]},
+  ]}]}]};
+  expect(semantic(parse(stringify(document)))).toEqual(document);
+});
+
 it("keeps unknown safe native elements stable through canonical writing",()=> {
   const document=parse('A <abbr title="Application Programming Interface">API</abbr>.\n\n<aside>Safe <kbd>Enter</kbd>.</aside>');
   expect(parse(stringify(document))).toEqual(document);
@@ -323,9 +387,10 @@ it("rejects malformed supplied scalar fields, metadata, groups and rich grids",(
   expect(()=>stringify({type:"document",version:1,syntax:"compatible",metadata:[],body:[]} as never)).toThrow(/mapping/);
   expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"container",subType:"note",title:{type:"title",children:[{type:"text",value:"One"},{type:"break"},{type:"text",value:"Two"}]},body:[]}]})).toThrow(/title/);
 });
-it("rejects one-line identity and tight-wrapper title violations without corrupting source",()=> {
+it("rejects multiline block identities and retains representable padded titles",()=> {
   expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"heading",level:2,id:"line\nbreak",value:"Title"}]})).toThrow(/ID/);
-  expect(()=>stringify({type:"document",version:1,syntax:"compatible",body:[{type:"container",subType:"note",title:{type:"title",value:" padded "},body:[]}]})).toThrow(/title/);
+  const padded: Document={type:"document",version:1,syntax:"compatible",body:[{type:"container",subType:"note",title:{type:"title",value:" padded "},body:[]}]};
+  expect(semantic(parse(stringify(padded)))).toEqual(padded);
   const root={type:"document",version:1,syntax:"compatible",id:"line\nbreak",body:[]} as const;
   expect(semantic(parse(stringify(root as never)))).toEqual(root);
 });

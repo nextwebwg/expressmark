@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3
+
+- Preserve literal leading and trailing whitespace, tabs and line endings in
+  generated text, including headings, table cells and definition terms.
+- Keep mentions readable after whitespace encoded as a character reference.
+- Keep separate adjacent lists distinct when generating or inserting lists, and
+  preserve nested quotes after empty paragraphs in tight list items.
+
 ## 0.6.2
 
 - Preserve literal Markdown punctuation inside generated inline HTML,
