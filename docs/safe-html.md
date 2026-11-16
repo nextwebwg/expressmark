@@ -21,7 +21,8 @@ output are removed. Comments are not retained.
 An inline `picture` keeps its native `source` and fallback `img` elements
 through parsing, writing and rendering, including source media conditions and
 image alternatives. Its contents pass through the same safe profile as other
-HTML.
+HTML. `source` is a void element; normalization keeps it without adding a closing
+tag or a false stray-end-tag diagnostic.
 
 | Scope | Accepted attributes |
 | --- | --- |
