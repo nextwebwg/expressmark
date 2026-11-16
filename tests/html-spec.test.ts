@@ -59,8 +59,11 @@ describe("an element's tags in separate HTML blocks", () => {
 describe("native heading alignment", () => {
   it.each(["left", "center", "right", "justify"])("keeps %s alignment and responsive picture choices", align => {
     const source = `<h1 align="${align}"><picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo" width="280"></picture></h1>`;
-    const document = parse(source);
+    const codes: string[] = [];
+    const document = parse(source, {onDiagnostic: diagnostic => codes.push(diagnostic.code)});
     const html = renderHtml(document);
+    expect(codes).not.toContain("stray-end-tag");
+    expect(html).not.toContain("</source>");
     expect(html).toContain(`<h1 align="${align}">`);
     expect(html).toContain('srcset="dark.svg"');
     expect(html).toContain('src="light.svg"');
@@ -76,10 +79,13 @@ describe("native heading alignment", () => {
 });
 
 describe("native picture content", () => {
-  it("retains responsive sources and the fallback image in inline HTML", () => {
-    const source = '<picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"><img src="light.svg" alt="Logo"></picture>';
-    const document = parse(source);
+  it.each([">", " />"])("retains responsive sources ending with %s and the fallback image in inline HTML", ending => {
+    const source = `<picture><source media="(prefers-color-scheme: dark)" srcset="dark.svg"${ending}<img src="light.svg" alt="Logo"></picture>`;
+    const codes: string[] = [];
+    const document = parse(source, {onDiagnostic: diagnostic => codes.push(diagnostic.code)});
     const html = renderHtml(document);
+    expect(codes).not.toContain("stray-end-tag");
+    expect(html).not.toContain("</source>");
     expect(html).toContain('<source media="(prefers-color-scheme: dark)" srcset="dark.svg"');
     expect(html).toContain('<img src="light.svg" alt="Logo"');
     expect(html).not.toContain("&lt;source");

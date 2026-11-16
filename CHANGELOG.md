@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5
+
+- Keep picture sources as void elements during safe HTML normalization, avoiding
+  invented closing tags and false stray-end-tag diagnostics.
+
 ## 0.6.4
 
 - Preserve native heading alignment through safe HTML parsing and rendering,

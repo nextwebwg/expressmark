@@ -13,6 +13,9 @@ const size = /^(?:auto|0|\d+(?:\.\d+)?(?:px|em|rem|%|ch|vh|vw))$/;
 const policy: sanitize.IOptions = {
   // `picture` and `source` choose an image by color scheme or size, as READMEs use them.
   allowedTags: [...sanitize.defaults.allowedTags, "img", "details", "summary", "picture", "source"],
+  // The sanitizer's default void list omits source. Inventing its closing tag
+  // makes valid pictures report a stray end tag on the next parsing pass.
+  selfClosing: [...sanitize.defaults.selfClosing, "source"],
   allowedAttributes: {
     "*": ["id", "class", "style", "title", "lang", "dir", "data-*", "aria-*"],
     a: ["href", "name", "target", "rel"],
