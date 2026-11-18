@@ -306,3 +306,23 @@ export function rememberSpellings(node: Node): void {
 export function spellingHolds(original: Node, node: Node, key: string): boolean {
   return fingerprints.get(original)?.get(key) === fingerprint(node, key);
 }
+
+// Inline math delimiters follow Pandoc's tex_math_dollars rules: see the spec's
+// math section. A backslash-escaped `$` is text and does not count as adjacent.
+const escapedAt=(source: string, at: number): boolean => {
+  let slashes=0;
+  while(source[at-1-slashes] === "\\") slashes++;
+  return slashes%2 === 1;
+};
+/** Whether the `$` at `at` is a math delimiter: unescaped, with no unescaped `$` beside it. */
+export function mathDelimiter(source: string, at: number): boolean {
+  return source[at] === "$" && !escapedAt(source,at) && source[at+1] !== "$" && !(source[at-1] === "$" && !escapedAt(source,at-1));
+}
+/** The index of the `$` that closes inline math opened at `open`, before `max`, or -1. */
+export function mathEnd(source: string, open: number, max = source.length): number {
+  if(!mathDelimiter(source,open) || open+1 >= max || /\s/u.test(source[open+1]!)) return -1;
+  for(let at=source.indexOf("$",open+2);at !== -1 && at<max;at=source.indexOf("$",at+1)) {
+    if(mathDelimiter(source,at) && !/\s/u.test(source[at-1]!) && !/[0-9]/.test(source[at+1] ?? "")) return at;
+  }
+  return -1;
+}

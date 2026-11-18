@@ -1,6 +1,6 @@
 import { stringify as yamlStringify } from "yaml";
 import { escapeText, startsMention, type TextContext } from "./escape.js";
-import { alertMarker, contentHash, contentHashes, definitionGroups, destination, diagnoseIds, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, quoteTitle, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
+import { alertMarker, contentHash, contentHashes, definitionGroups, destination, diagnoseIds, mathEnd, normalizeLabel, readAttributes, readInfo, sameData, spellingHolds, structuralTypes, trailingAttributeLists, quoteAttribute, quoteTitle, sourceKey, tokenHandle, writeAttributes } from "./grammar.js";
 import { escapeHtml, rawTextElements, readStartTag, safeAuthoredAttributes, safeUrl, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, voidElements } from "./html.js";
 import { syntax } from "./escape.js";
 import { parse } from "./parse.js";
@@ -32,12 +32,12 @@ function attrsHtml(node: Node, extra: Record<string,string|boolean|number> = {})
 // Node field contracts, shared by every validation call.
 const known=new Set(["type","subType","id","title","body","children","value","attributes","position","source","data","level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","open","close","syntax","version","metadata"]);
 const special=["level","ordered","start","tight","checked","url","alt","language","meta","ref","label","referenceType","spelling","titleSpelling","align","header","colSpan","rowSpan","display","tag","open","close","syntax","version","metadata"];
-const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
-const blockTypes=new Set(["paragraph","heading","blockquote","list","code","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition","definitionList","strayFence"]);
+const inlineTypes=new Set(["text","emphasis","strong","delete","underline","highlight","inlineCode","inlineMath","break","softBreak","link","image","inline","footnoteReference","linkReference","imageReference"]);
+const blockTypes=new Set(["paragraph","heading","blockquote","list","code","math","lineBlock","table","container","leaf","horizontalRule","footnoteDefinition","definition","definitionList","strayFence"]);
 const structural: Record<string,string[]> = {
     document:["version","metadata","syntax"], htmlElement:["tag","open","close","tight","display"], footnoteReference:["label"], footnoteDefinition:["label"],
     container:["spelling","titleSpelling"], definition:["label","url"], linkReference:["label","referenceType"], imageReference:["label","referenceType","alt"], heading:["level"], list:["ordered","start","tight"], listItem:["checked","tight"], definitionDescription:["tight"],
-    link:["url"],image:["url","alt"],code:["language","meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
+    link:["url"],image:["url","alt"],code:["language","meta"], math:["meta"], inline:["ref"],table:["align"],tableCell:["header","colSpan","rowSpan"],group:["display","tag"],html:["display"],literal:["display"],
 };
 function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(!node || typeof node !== "object" || typeof node.type !== "string" || !node.type) fail(`${path} needs a nonempty node type.`);
@@ -79,7 +79,7 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
   if(node.body?.some((child,index)=>child.type === "definitionList" && node.body![index-1]?.type === "definitionList")) fail(`${path} holds adjacent definition lists, which read back as one.`);
   if(["paragraph","heading","title","emphasis","strong","delete","underline","highlight","lineBlock","link","linkReference","tableCell","definitionTerm"].includes(node.type) && node.value == null && node.children == null && !(node.type === "tableCell" && node.body)) fail(`${path} needs content.`);
   if(node.type === "strayFence" && !/^:{3,}$/.test(node.value ?? "")) fail(`${path} needs a bare colon fence value.`);
-  if(["text","inlineCode","code","html","literal","strayFence"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
+  if(["text","inlineCode","inlineMath","code","math","html","literal","strayFence"].includes(node.type) && typeof node.value !== "string") fail(`${path} needs literal value content.`);
   if(["definition","linkReference","imageReference"].includes(node.type)) {
     // A label is CommonMark link-label text: unescaped brackets close it early.
     if(typeof node.label !== "string" || !/^(?:\\[\s\S]|[^\\[\]])+$/.test(node.label) || !node.label.trim() || /\n[ \t]*\n/.test(node.label) || node.label.length>999) fail(`${path}.label needs a link label.`);
@@ -87,8 +87,8 @@ function validate(node: Node, path = "document", seen = new Set<Node>()): void {
     if(node.type === "definition" && (node.id !== undefined || node.attributes)) fail(`${path} has no definition attribute source mapping.`);
   }
   if(["image","break","softBreak","horizontalRule","leaf","footnoteReference","definition","imageReference"].includes(node.type) && [node.value,node.children,node.body].some(value=>value != null)) fail(`${path} is bodyless.`);
-  if(node.title != null && !["document","container","table","code","link","image","leaf","definition"].includes(node.type)) fail(`${path} does not define a title.`);
-  if(["code","link","image","definition"].includes(node.type) && node.title != null && typeof node.title !== "string") fail(`${path}.title must be a string.`);
+  if(node.title != null && !["document","container","table","code","math","link","image","leaf","definition"].includes(node.type)) fail(`${path} does not define a title.`);
+  if(["code","math","link","image","definition"].includes(node.type) && node.title != null && typeof node.title !== "string") fail(`${path}.title must be a string.`);
   if(["document","container","table","leaf"].includes(node.type) && node.title != null && (typeof node.title !== "object" || node.title.type !== "title")) fail(`${path}.title must be a title node.`);
   const isInline=(child:Node)=>inlineTypes.has(child.type) || ["group","html","literal","htmlElement"].includes(child.type) && child.display === "inline";
   const isBlock=(child:Node)=>blockTypes.has(child.type) || ["group","html","literal","htmlElement"].includes(child.type) && child.display === "block";
@@ -282,6 +282,14 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       return `${mark}${value}${mark}`;
     }
     if(["underline","highlight","group"].includes(node.type)) return safeNative(node,true);
+    if(node.type === "inlineMath") {
+      const value=node.value ?? "";
+      if(attrs) fail("Inline math has no attribute source mapping.");
+      // Touching delimiters are never math, so adjacent inline math reads back as text.
+      if(next?.type === "inlineMath") fail("Adjacent inline math nodes have no Markdown mapping.");
+      if(value.includes("\n") || mathEnd(`$${value}$`,0) !== value.length+1) fail("Inline math needs notation that $…$ reads back unchanged.");
+      return `$${value}$`;
+    }
     if(node.type === "inlineCode") {
       // Adjacent fences join into a different run and consume their boundaries.
       if(attrs || previous?.type === "inlineCode" || next?.type === "inlineCode") return safeNative(node,true);
@@ -547,6 +555,13 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
       const closing=spelling(node,"closing");
       return `${"#".repeat(node.level!)} ${text}${closing && /^#+$/.test(closing) ? ` ${closing}`:""}`;
     }
+    if(node.type === "math") {
+      const value=node.value ?? "";
+      // Only a fence carries an ID, attributes, a caption or metadata, or holds a `$$` line.
+      if(spelling(node,"fence") || node.id !== undefined || node.attributes || node.title !== undefined || node.meta !== undefined || /^[ \t]*\$\$[ \t]*$/m.test(value)) return block({...node,type:"code",language:"math"});
+      if(spelling(node,"form") === "line" && value.trim() && !value.includes("\n") && value.trim() === value) return `$$${value}$$`;
+      return `$$\n${value}\n$$`;
+    }
     if(node.type === "code") {
       if(node.language && /[\s{}\n]/.test(node.language)) fail("Code language cannot contain whitespace or attribute delimiters.");
       if(typeof node.title === "object") fail("Code title must be literal text.");
@@ -678,7 +693,7 @@ export function stringify(document: Document, options: ConversionOptions = {}): 
     // A blank line between an item's blocks would loosen its list.
     return blocks.map(({node,value},index)=> {
       // A tight item's blocks touch: a block that interrupts a paragraph follows it directly.
-      const interrupts=["list","blockquote","container","table"].includes(node.type) || node.type === "code" && node.source?.form !== "indented" || node.type === "heading" && node.source?.form !== "setext";
+      const interrupts=["list","blockquote","container","table","math"].includes(node.type) || node.type === "code" && node.source?.form !== "indented" || node.type === "heading" && node.source?.form !== "setext";
       const previous=blocks[index-1];
       // Native paragraph HTML consumes following lines until a blank separator.
       const adjacent=tightList && interrupts && previous?.node.type === "paragraph" && !/^<p(?:\s|>)/u.test(previous.value);

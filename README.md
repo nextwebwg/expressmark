@@ -129,6 +129,10 @@ rendering is available from 0.1.2.
 - Mention shorthand, chips and authored TOC placeholders.
 - Footnotes: `[^label]` references and `[^label]:` definitions, kept where they
   were written and rendered as one numbered, back-linked notes section.
+- Math: inline `$…$`, display `$$` lines or `$$…$$`, and `math` fences, read
+  as `inlineMath` and `math` nodes holding the TeX as written. Prices such as
+  `$5 and $10` stay text. HTML renders the notation as escaped code; a
+  transformer can typeset it.
 - Reference-style links and images with their `[label]: url` definitions, kept
   in their authored form and resolved when rendering.
 - Definition lists: a one-line term, then `: ` descriptions holding blocks,

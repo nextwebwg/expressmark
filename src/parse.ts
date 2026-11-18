@@ -1,7 +1,7 @@
 import { Engine, type StateBlock, type StateInline, type Token } from "./markdown/engine.js";
 import { parseDocument as yamlDocument, isMap, isSeq, isScalar } from "yaml";
 import { footnoteDefinitions, referenceOrder } from "./references.js";
-import { alertMarker, attach, quoteTitle, childHashes, compact, contentHash, destination, plainText, quoteAttribute, readInfo, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { alertMarker, attach, quoteTitle, childHashes, compact, contentHash, destination, plainText, quoteAttribute, readInfo, mathEnd, rememberSpellings, writeAttributes, structuralTypes, diagnoseIds, mentionBoundary, readAttributes, readHeader, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import { escapeHtml, htmlNodes, normalizeTags, parentEndCloses, readStartTag, sanitizeFragment, sanitizeStartTag, sanitizeHtml, sanitizeLiteral, TagStack, unmatchedTags, voidElements } from "./html.js";
 import { mergeTable, readListTable, readTableField } from "./tables.js";
 import { installStandard, standardRules, type StandardRule } from "./standard.js";
@@ -69,6 +69,9 @@ function readers(standard: ReadonlySet<StandardRule>): Readers {
   const blockHook=(name: keyof Hooks): BlockHook => (state,start,end,silent) => (hooksOf(state)[name] as BlockHook)(state,start,end,silent);
   const blocks=["paragraph","reference","blockquote","list"];
   md.inline.ruler.before("backticks","expressive_line_code",inlineHook("expressive_line_code"));
+  md.inline.ruler.before("backticks","math_inline",mathInline);
+  md.block.ruler.before("fence","math_block",mathBlock,{alt:blocks});
+  lexicalMd.block.ruler.before("fence","math_block",mathBlock,{alt:blocks});
   md.inline.ruler.before("emphasis","expressive",inlineHook("expressive"));
   md.inline.ruler.after("expressive","expressive_attachment",inlineHook("expressive_attachment"));
   md.block.ruler.before("reference","footnote_definition",blockHook("footnote_definition"),{alt:["paragraph","reference"]});
@@ -90,6 +93,41 @@ function readers(standard: ReadonlySet<StandardRule>): Readers {
   readerCache.set(key,built);
   return built;
 }
+// Display math: `$$` lines around the notation, or `$$…$$` on one line. An
+// unclosed `$$` stays text; see the spec's math section.
+const mathBlock: BlockHook=(state,start,end,silent) => {
+  if(state.sCount[start]!-state.blkIndent >= 4) return false;
+  const first=line(state,start).trimEnd();
+  if(!first.startsWith("$$")) return false;
+  let value: string, next=start+1, form: string | undefined;
+  if(first === "$$") {
+    for(;next<end;next++) {
+      const pos=state.bMarks[next]!+state.tShift[next]!;
+      if(pos<state.eMarks[next]! && state.sCount[next]!<state.blkIndent) return false;
+      if(state.sCount[next]!-state.blkIndent<4 && line(state,next).trimEnd() === "$$") break;
+    }
+    if(next >= end) return false;
+    if(silent) return true;
+    value=state.getLines(start+1,next,state.sCount[start]!,true).slice(0,-1);
+    next++;
+  } else {
+    if(first.length<5 || !first.endsWith("$$") || !first.slice(2,-2).trim()) return false;
+    if(silent) return true;
+    value=first.slice(2,-2).replace(/^[ \t]+|[ \t]+$/g,""); form="line";
+  }
+  state.line=next;
+  const token=state.push("math_block","",0);
+  token.content=value; token.map=[start,next]; token.markup=form ?? "$$";
+  return true;
+};
+const mathInline: InlineHook=(state,silent) => {
+  const start=state.pos;
+  if(state.src[start] !== "$") return false;
+  const close=mathEnd(state.src,start,state.posMax);
+  if(close<0) return false;
+  if(!silent) state.push("math_inline","",0).content=state.src.slice(start+1,close).replace(/\n/g," ");
+  state.pos=close+1; return true;
+};
 function alertLine(state: StateBlock, start: number): boolean {
   if(state.tokens.at(-1)?.type !== "blockquote_open") return false;
   const marker=alertMarker.exec(line(state,start));
@@ -443,7 +481,7 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
     let lexical=contexts.get(key);
     if(!lexical || lexical.from>start+1) {
       const ranges=new Map<number,number>();
-      for(const token of lexicalMd.parse(state.getLines(start+1,end,state.blkIndent,false),{})) if(["fence","code_block","html_block"].includes(token.type) && token.map) ranges.set(start+1+token.map[0],start+1+token.map[1]);
+      for(const token of lexicalMd.parse(state.getLines(start+1,end,state.blkIndent,false),{})) if(["fence","code_block","html_block","math_block"].includes(token.type) && token.map) ranges.set(start+1+token.map[0],start+1+token.map[1]);
       lexical={from:start+1,ranges}; contexts.set(key,lexical);
     }
     const literalRanges=lexical.ranges;
@@ -619,6 +657,7 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
         if(token.type === "text") nodes.push({type:"text",value:token.content});
         else if(token.type === "expressive_inline") nodes.push(token.meta!.node as Node);
         else if(token.type === "footnote_ref") nodes.push({type:"footnoteReference",label:token.meta!.label as string});
+        else if(token.type === "math_inline") nodes.push({type:"inlineMath",value:token.content});
         else if(token.type === "softbreak" || token.type === "hardbreak") {
           const node: Node={type:token.type === "hardbreak" || lineBlock ? "break":"softBreak"};
           if(token.meta?.spaces) spell(node,"spaces",token.meta.spaces as number);
@@ -856,12 +895,19 @@ function read(markdown: string, options: ConversionOptions, edit?: Edit, keep = 
           // One parser-added terminal LF is removed; authored trailing blank lines remain.
           node.value=token.content.endsWith("\n") ? token.content.slice(0,-1) : token.content;
           Object.assign(node,readInfo(token.info,options),{type:"code"});
+          // A `math` fence is display math; the fence is its recorded spelling.
+          const math=token.type === "fence" && node.language === "math";
+          if(math) { node.type="math"; delete node.language; spell(node,"fence",token.markup); }
           if(token.type === "code_block") spell(node,"form","indented");
           else {
-            if(token.markup !== codeFence(node)) spell(node,"fence",token.markup);
+            if(!math && token.markup !== codeFence(node)) spell(node,"fence",token.markup);
             const info=token.info.trim();
-            if(info !== [node.language,writeAttributes(node,typeof node.title === "string" ? {title:node.title}:{}),node.meta].filter(Boolean).join(" ")) spell(node,"info",info);
+            if(info !== [math ? "math" : node.language,writeAttributes(node,typeof node.title === "string" ? {title:node.title}:{}),node.meta].filter(Boolean).join(" ")) spell(node,"info",info);
           }
+          nodes.push(node);
+        } else if(token.type === "math_block") {
+          const node: Node={type:"math",value:token.content};
+          if(token.markup === "line") spell(node,"form","line");
           nodes.push(node);
         } else if(token.type === "hr") {
           const node: Node={type:"horizontalRule"};
