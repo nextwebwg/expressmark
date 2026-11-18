@@ -25,7 +25,7 @@ export function installStandard(md: Engine, lexical: Engine, rules: ReadonlySet<
     block.disable("code"); lexical.block.ruler.disable("code");
     // Indentation never makes code, so a block that CommonMark reads only below
     // four columns of indentation reads at any indentation.
-    for (const name of ["table","fence","blockquote","hr","heading","reference","footnote_definition","expressive_container","expressive_leaf","expressive_line_block"]) {
+    for (const name of ["table","fence","math_block","blockquote","hr","heading","reference","footnote_definition","expressive_container","expressive_leaf","expressive_line_block"]) {
       const rule = entry<BlockRule>(block, name); if (!rule) continue;
       const fn = rule.fn;
       block.at(name, (state, start, end, silent) => {

@@ -1,5 +1,5 @@
 import { Engine, type StateInline } from "./markdown/engine.js";
-import { mentionBoundary, normalizeLabel, readAttributes, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
+import { mathDelimiter, mathEnd, mentionBoundary, normalizeLabel, readAttributes, readLabel, tokenHandle, tokenIdentifier } from "./grammar.js";
 import type { Node } from "./types.js";
 
 export interface TextContext {
@@ -94,11 +94,31 @@ export function escapeText(value: string, context: TextContext = {}): string {
   for(const tick of ticks) if(mixed || counts.get(tick[0].length)!>1) {
     for(let i=tick.index;i<tick.index+tick[0].length;i++) escapes.add(i);
   }
+  // Stored backslashes are written escaped, so none protects a `$` in the source.
+  const dollars=value.includes("$") ? value.replace(/\\/g,"x") : "";
+  let opener=false;
+  const encode=new Set<number>();
+  if(context.previous?.type === "inlineMath") {
+    if(/^[0-9]/.test(value)) encode.add(0);
+    if(value[0] === "$") escapes.add(0);
+  }
+  if(context.next?.type === "inlineMath" && value.endsWith("$")) escapes.add(value.length-1);
   const brackets: number[]=[];
   const inlineState=new syntax.inline.State(value,syntax,{},[]);
   for(let i=0;i<value.length;i++) {
     const char=value[i]!;
     if(char === "\\" && (/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~\n]/.test(value[i+1] ?? "") || i === value.length-1 && (context.next || context.label || context.marks))) escapes.add(i);
+    // A `$` that could pair with another delimiter is escaped. Across nodes the
+    // pairing is unknown, so a possible opener before a later node, or a
+    // possible closer after an earlier one, is escaped too.
+    // ponytail: escapes some `$` the full paragraph would leave as text; scan the written paragraph if that matters.
+    if(char === "$" && mathDelimiter(dollars,i)) {
+      const opens=i+1<value.length && !/\s/u.test(value[i+1]!);
+      const closes=(i === 0 || !/\s/u.test(value[i-1]!)) && !/[0-9]/.test(value[i+1] ?? "");
+      if(opens && (mathEnd(dollars,i)>0 || context.next)) escapes.add(i);
+      else if(closes && context.previous && !opener) escapes.add(i);
+      if(opens) opener=true;
+    }
     if(char === "[" || char === "<" && !context.htmlText) {
       if(opensInlineSyntax(inlineState,i)) {
         escapes.add(i);
@@ -155,7 +175,7 @@ export function escapeText(value: string, context: TextContext = {}): string {
       const leading=/^[ \t]*/.exec(line)![0].length;
       const rest=line.slice(leading);
       if(offset>0 || !context.previous || context.previous.type === "softBreak" || context.previous.type === "break") {
-        if(/^(?:#{1,6}(?:[ \t]|$)|>|[+*-](?:[ \t]|$)|\||:{2,}|`{3,}|~{3,}|<(?:[A-Za-z][\w-]*(?:\s|$)|[!?]))/.test(rest)
+        if(/^(?:#{1,6}(?:[ \t]|$)|>|[+*-](?:[ \t]|$)|\||:{2,}|`{3,}|~{3,}|\$\$(?:[ \t]*$|.*\$\$[ \t]*$)|<(?:[A-Za-z][\w-]*(?:\s|$)|[!?]))/.test(rest)
           || /^(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*$/.test(rest)
           || (offset>0 || context.previous?.type === "softBreak") && /^(?:=+|-+)[ \t]*$/.test(rest)) escapes.add(offset+leading);
         const ordered=/^\d{1,9}([.)])(?=[ \t]|$)/.exec(rest);
@@ -182,6 +202,7 @@ export function escapeText(value: string, context: TextContext = {}): string {
   const leading=!context.previous || ["break","softBreak"].includes(context.previous.type) ? /^\s*/u.exec(value)![0].length:0;
   const trailing=!context.next || ["break","softBreak"].includes(context.next.type) ? value.trimEnd().length:value.length;
   return Array.from(value.matchAll(/&(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]*);|[\s\S]/g),match=> {
+    if(encode.has(match.index)) return `&#${match[0].codePointAt(0)};`;
     if(!context.htmlText && (/^[\r\n\t]$/.test(match[0]) || /^\s$/u.test(match[0]) && (match.index<leading || match.index>=trailing))) return `&#${match[0].codePointAt(0)};`;
     if(!context.htmlText && match[0].length>1 && syntax.utils.unescapeAll(match[0]) !== match[0]) return `&amp;${match[0].slice(1)}`;
     return `${escapes.has(match.index) ? "\\":""}${match[0]}`;

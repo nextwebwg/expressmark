@@ -215,6 +215,7 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
       case "underline": return element(node, "u", content(node));
       case "highlight": return element(node, "mark", content(node));
       case "inlineCode": return element(node, "code", text(node.value ?? ""));
+      case "inlineMath": return `<code class="language-math">${text(node.value ?? "")}</code>`;
       case "softBreak": return "\n";
       case "break": return `<br${attributes(node)}>`;
       case "horizontalRule": return `<hr${attributes(node)}>`;
@@ -248,8 +249,9 @@ export function renderHtml(document: Document, options: HtmlRenderOptions = {}):
         if (!allowed(tag)) { shownElement(tag); return `${text(node.open ?? "")}${inner}${node.close ? text(node.close) : ""}`; }
         return `${open}${inner}${close}`;
       }
-      case "code": {
-        const code = element(node, "pre", `<code${node.language ? ` class="language-${escapeHtml(node.language)}"` : ""}>${text(node.value ?? "")}</code>`);
+      case "math": case "code": {
+        const language = node.type === "math" ? "math" : node.language;
+        const code = element(node, "pre", `<code${language ? ` class="language-${escapeHtml(language)}"` : ""}>${text(node.value ?? "")}</code>`);
         return node.title ? `<figure>${code}<figcaption>${title(node)}</figcaption></figure>` : code;
       }
       case "group": return element(node, node.display === "inline" ? "span" : "div", content(node));

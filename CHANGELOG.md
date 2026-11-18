@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0
+
+- Read and write math: inline `$…$`, display math between `$$` lines or as
+  `$$…$$` on one line, and `math` code fences. They become `inlineMath` and
+  `math` nodes holding the TeX notation as written. Pandoc's delimiter rules
+  keep prices such as `$5 and $10` and `$5–$10` as text. `renderHtml` writes
+  the notation as escaped `code.language-math`; a `math` or `inlineMath`
+  transformer can typeset it. A `math` fence was a `code` node with language
+  `math`; it is now a `math` node.
+
 ## 0.6.5
 
 - Keep picture sources as void elements during safe HTML normalization, avoiding
